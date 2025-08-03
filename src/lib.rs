@@ -32,31 +32,28 @@ pub mod core {
             .unwrap_or("– keine Bedeutung –")
     }
 
-    pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
+    pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {
         // Sonderfall: Eingabe ist Masterzahl → sofort zurückgeben
         if input == "11" || input == "22" || input == "33" {
-            if debug {
-                println!("{} ist eine Masterzahl → {}", input, input);
-            }
-            return input.parse().unwrap();
+            let line = format!("{input} ist eine Masterzahl → {input}");
+            return (input.parse().unwrap(), vec![line]);
         }
+
         // 1. Werte der einzelnen Zeichen berechnen
         let values: Vec<u32> = input.chars().map(char_to_value).collect();
         let mut num: u32 = values.iter().sum();
 
-        if debug {
-            // Erste Debug-Zeile: Zeichenwerte
-            println!(
-                "{} → [{}] = {}",
-                input,
-                values
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect::<Vec<_>>()
-                    .join("+"),
-                num
-            );
-        }
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "{} → [{}] = {}",
+            input,
+            values
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join("+"),
+            num
+        ));
 
         // 2. Reduktionen durchführen
         while num > 9 && !matches!(num, 11 | 22 | 33) {
@@ -66,26 +63,29 @@ pub mod core {
                 .map(|c| c.to_digit(10).unwrap())
                 .collect();
             let sum: u32 = digits.iter().sum();
-
-            if debug {
-                println!(
-                    "→ {} = {}",
-                    digits
-                        .iter()
-                        .map(|d| d.to_string())
-                        .collect::<Vec<_>>()
-                        .join("+"),
-                    sum
-                );
-            }
-
+            lines.push(format!(
+                "→ {} = {}",
+                digits
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("+"),
+                sum
+            ));
             num = sum;
         }
 
-        if debug {
-            println!("→ Quersumme: {num}");
-        }
+        lines.push(format!("→ Quersumme: {num}"));
+        (num, lines)
+    }
 
+    pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
+        let (num, lines) = reduce_number_steps(input);
+        if debug {
+            for line in lines {
+                println!("{line}");
+            }
+        }
         num
     }
 
