@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs, path::Path};
 
-use chrono::{NaiveDate, Duration, Local};
+use chrono::{Duration, Local, NaiveDate};
 use clap::{Arg, ArgAction, Command};
 use prettytable::{Table, row};
 use regex::Regex;
@@ -21,12 +21,55 @@ fn char_to_value(ch: char) -> u32 {
     }
 }
 
-fn reduce_number(mut n: u32) -> u32 {
-    while n > 9 && !matches!(n, 11 | 22 | 33) {
-        n = n.to_string().chars().map(|c| c.to_digit(10).unwrap()).sum();
+fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
+    // 1. Werte der einzelnen Zeichen berechnen
+    let values: Vec<u32> = input.chars().map(char_to_value).collect();
+    let mut num: u32 = values.iter().sum();
+
+    if debug {
+        // Erste Debug-Zeile: Zeichenwerte
+        println!(
+            "{} → [{}] = {}",
+            input,
+            values.iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join("+"),
+            num
+        );
     }
-    n
+
+    // 2. Reduktionen durchführen
+    while num > 9 && !matches!(num, 11 | 22 | 33) {
+        let digits: Vec<u32> = num
+            .to_string()
+            .chars()
+            .map(|c| c.to_digit(10).unwrap())
+            .collect();
+        let sum: u32 = digits.iter().sum();
+
+        if debug {
+            println!(
+                "→ {} = {}",
+                digits
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("+"),
+                sum
+            );
+        }
+
+        num = sum;
+    }
+
+    if debug {
+        println!("→ Quersumme: {num}");
+    }
+
+    num
 }
+
 
 fn load_bedeutungen(path: &Path) -> HashMap<u32, Bedeutung> {
     let yaml = fs::read_to_string(path).expect("bedeutungen.yaml nicht gefunden");
@@ -43,7 +86,8 @@ fn lookup_row(table: &mut Table, zahl: u32, map: &HashMap<u32, Bedeutung>) {
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION");
-    let about = format!(r#"
+    let about = format!(
+        r#"
 ┌────────────────────────┐
 │   KERN™CODE - v{version}   │
 └────────────────────────┘
@@ -62,7 +106,8 @@ fn main() {
    Retinal Echo Match ✓
    Pulse Resonance ✓
    Dream Residue ✓
-      "#);
+      "#
+    );
     let matches = Command::new("kern")
         .version(env!("CARGO_PKG_VERSION"))
         .about(about)
@@ -88,9 +133,18 @@ fn main() {
                 .long("date")
                 .value_name("RANGE")
                 .allow_hyphen_values(true)
-                .help(r#"Datums-Offset/Range:
+                .help(
+                    r#"Datums-Offset/Range:
     -3, +2, 0+3, 0-3, -5..4, 3..-2, etc.
-    28.07.2025, 26.07.2025..02.08.2025"#),
+    28.07.2025, 26.07.2025..02.08.2025"#,
+                ),
+        )
+        .arg(
+            Arg::new("debug")
+                .short('v')
+                .long("verbose")
+                .action(ArgAction::SetTrue)
+                .help("Zeigt die vollständige Reduktionskette für jede Eingabe"),
         )
         .arg(
             Arg::new("ARGS")
@@ -195,6 +249,8 @@ fn main() {
             .map_err(|_| "Ungültige Range-Angabe".into())
     }
 
+    let debug = matches.get_flag("debug");
+
     if let Some(dspec) = matches.get_one::<String>("date") {
         match parse_range(dspec) {
             Ok(offsets) => {
@@ -206,42 +262,49 @@ fn main() {
 
                 for off in offsets {
                     let date = today + Duration::days(off as i64);
-                    let num = reduce_number(
-                        date.format("%d%m%Y")
-                            .to_string()
-                            .chars()
-                            .map(|c| c.to_digit(10).unwrap() as u32)
-                            .sum(),
-                    );
-                    let text = map.get(&num).and_then(|b| b.text.as_deref()).unwrap_or("–");
-                    t.add_row(row![
-                        format!("{:+}", off),
-                        date.format("%d.%m.%Y"),
-                        num,
-                        text
-                    ]);
+
+                    // Debug/Normal trennen
+                    let date_str = date.format("%d%m%Y").to_string();
+                    let num = reduce_number_verbose(&date_str, debug);
+
+                    if !debug {
+                        let text = map.get(&num).and_then(|b| b.text.as_deref()).unwrap_or("–");
+                        t.add_row(row![
+                            format!("{:+}", off),
+                            date.format("%d.%m.%Y"),
+                            num,
+                            text
+                        ]);
+                    }
                 }
-                t.printstd();
+
+                if !debug {
+                    t.printstd();
+                }
             }
             Err(e) => eprintln!("{e}"),
         }
-        // kein return; Berechnung von ARGS darf danach weiterlaufen
     }
 
     /* ­--length Flag gesetzt? -------------------------------------------- */
     let show_length = matches.get_flag("length");
+    let debug = matches.get_flag("debug");
 
     /* Standard-Modus: Strings berechnen ---------------------------------- */
     if let Some(args) = matches.get_many::<String>("ARGS") {
         for arg in args {
-            let total: u32 = arg.chars().map(char_to_value).sum();
-            let reduced = reduce_number(total);
-
-            if show_length {
-                let len = arg.chars().count();
-                println!("{arg}: {reduced} ({len})");
+            if debug {
+                // Debugmodus → nur Reduktionskette
+                reduce_number_verbose(arg, true);
             } else {
-                println!("{arg}: {reduced}");
+                // Normale Ausgabe
+                let reduced = reduce_number_verbose(arg, false);
+                if show_length {
+                    let len = arg.chars().count();
+                    println!("{arg}: {reduced} ({len})");
+                } else {
+                    println!("{arg}: {reduced}");
+                }
             }
         }
     } else {
