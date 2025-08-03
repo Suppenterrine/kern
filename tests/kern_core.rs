@@ -51,3 +51,22 @@ fn test_parse_range_relative() {
     assert_eq!(parse_range("0+2").unwrap(), vec![0, 1, 2]);
     assert_eq!(parse_range("-3..1").unwrap(), vec![-3, -2, -1, 0, 1]);
 }
+
+//
+// ── 4.  Gesamtsumme-Logik ────────────────────────────────────────────────────
+//
+#[test]
+fn test_total_sum_reduction() {
+    // Ergebnisse von reduce_number_verbose simulieren
+    let results = vec![
+        reduce_number_verbose("awd", false),   // 1
+        reduce_number_verbose("ert", false),   // 7
+        reduce_number_verbose("ghr", false),   // 33
+    ];
+    assert_eq!(results, vec![1, 7, 33]);
+
+    // Summe = 1 + 7 + 33 = 41 → 4+1 = 5
+    let total_sum: u32 = results.iter().sum();
+    assert_eq!(total_sum, 41);
+    assert_eq!(reduce_number_verbose(&total_sum.to_string(), false), 5);
+}
