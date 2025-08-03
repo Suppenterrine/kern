@@ -42,12 +42,10 @@ fn lookup_row(table: &mut Table, zahl: u32, map: &HashMap<u32, Bedeutung>) {
 }
 
 fn main() {
-    let matches = Command::new("kern")
-        .version("0.1.0")
-        .about(
-            r#"
+    let version = env!("CARGO_PKG_VERSION");
+    let about = format!(r#"
 ┌────────────────────────┐
-│   KERN™CODE - v1.0.0   │
+│   KERN™CODE - v{version}   │
 └────────────────────────┘
 
 > decoding symbolic integers...
@@ -64,8 +62,10 @@ fn main() {
    Retinal Echo Match ✓
    Pulse Resonance ✓
    Dream Residue ✓
-      "#,
-        )
+      "#);
+    let matches = Command::new("kern")
+        .version(env!("CARGO_PKG_VERSION"))
+        .about(about)
         .arg(
             Arg::new("lookup")
                 .short('l')
