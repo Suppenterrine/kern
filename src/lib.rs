@@ -4,7 +4,7 @@ pub mod core {
     use chrono::{Local, NaiveDate};
     use regex::Regex;
     use serde::Deserialize;
-    use std::{collections::HashMap, fs, path::Path};
+    use std::{collections::HashMap};
 
     #[derive(Debug, Deserialize)]
     pub struct Bedeutung {
@@ -21,9 +21,11 @@ pub mod core {
         }
     }
 
-    pub fn load_bedeutungen(path: &Path) -> HashMap<u32, Bedeutung> {
-        let yaml = fs::read_to_string(path).expect("bedeutungen.yaml nicht gefunden");
-        serde_yaml::from_str(&yaml).expect("YAML konnte nicht geparst werden")
+    pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
+        // Datei wird zur Compilezeit als String eingebettet
+        let yaml_str = include_str!("../bedeutungen.yaml");
+        serde_yaml::from_str(yaml_str)
+            .expect("Eingebettete bedeutungen.yaml konnte nicht geparst werden")
     }
 
     pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {

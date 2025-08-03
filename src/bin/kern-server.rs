@@ -9,7 +9,7 @@ use kern::core::{
     Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr, path::Path as StdPath, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 #[derive(Clone)]
 struct AppState {
@@ -216,7 +216,7 @@ async fn date_handler(
 
 #[tokio::main]
 async fn main() {
-    let map = load_bedeutungen(StdPath::new("bedeutungen.yaml"));
+    let map = load_bedeutungen();
     let state = AppState { map: Arc::new(map) };
 
     let app = Router::new()

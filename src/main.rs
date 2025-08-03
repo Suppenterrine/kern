@@ -1,4 +1,3 @@
-use std::{path::Path};
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use prettytable::{Table, row};
@@ -83,7 +82,7 @@ fn main() {
 
     /* --lookup: sofort Tabelle ausgeben ---------------------------------- */
     if let Some(list) = matches.get_many::<String>("lookup") {
-        let map = load_bedeutungen(Path::new("bedeutungen.yaml"));
+        let map = load_bedeutungen();
         let mut t = Table::new();
         t.add_row(row!["Zahl", "Bedeutung"]);
 
@@ -114,7 +113,7 @@ fn main() {
     if let Some(dspec) = matches.get_one::<String>("date") {
         match parse_range(dspec) {
             Ok(offsets) => {
-                let map = load_bedeutungen(Path::new("bedeutungen.yaml"));
+                let map = load_bedeutungen();
                 let mut t = Table::new();
                 t.add_row(row!["Offset", "Datum", "Summe", "Bedeutung"]);
 
