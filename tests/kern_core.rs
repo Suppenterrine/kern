@@ -1,7 +1,7 @@
 //! Kern-Unittests (werden von `cargo test` automatisch gefunden)
 
+use chrono::Local;
 use kern::core::*;
-use chrono::{Local};
 
 //
 // ── 1.  Einzel-Char-Werte ────────────────────────────────────────────────────
@@ -35,13 +35,21 @@ fn test_reduce_number_verbose_simple() {
     assert_eq!(reduce_number_verbose("feldmann", false), 6);
 }
 
+#[test]
+fn test_reduce_number_steps_chain() {
+    let (val, chain) = reduce_number_steps("feldmann");
+    assert_eq!(val, 6);
+    assert!(!chain.is_empty());
+    assert!(chain.last().unwrap().contains("Quersumme"));
+}
+
 //
 // ── 3.  Datums-Offset-Parser ────────────────────────────────────────────────
 //
 #[test]
 fn test_parse_range_absolute_date() {
     let today = Local::now().date_naive();
-    let date_str = today.format("%d.%m.%Y").to_string();          // Offset 0
+    let date_str = today.format("%d.%m.%Y").to_string(); // Offset 0
     assert_eq!(parse_range(&date_str).unwrap(), vec![0]);
 }
 
@@ -59,9 +67,9 @@ fn test_parse_range_relative() {
 fn test_total_sum_reduction() {
     // Ergebnisse von reduce_number_verbose simulieren
     let results = vec![
-        reduce_number_verbose("awd", false),   // 1
-        reduce_number_verbose("ert", false),   // 7
-        reduce_number_verbose("ghr", false),   // 33
+        reduce_number_verbose("awd", false), // 1
+        reduce_number_verbose("ert", false), // 7
+        reduce_number_verbose("ghr", false), // 33
     ];
     assert_eq!(results, vec![1, 7, 33]);
 
