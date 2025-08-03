@@ -1,10 +1,13 @@
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
+    http::StatusCode,
     routing::get,
 };
 use chrono::{Duration, Local};
-use kern::core::{Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_verbose};
+use kern::core::{
+    Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
+};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, path::Path as StdPath, sync::Arc};
 
@@ -15,32 +18,105 @@ struct AppState {
 
 #[derive(Deserialize)]
 struct ReduceParams {
-    input: String,
+    input: Option<String>,
+    #[serde(default)]
+    debug: bool,
+    #[serde(default)]
+    length: bool,
+    #[serde(rename = "onlyTotal", default)]
+    only_total: bool,
+}
+
+#[derive(Serialize)]
+struct ReduceItem {
+    value: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
 struct ReduceResponse {
-    values: Vec<u32>, // jede Eingabe mit Wert
-    total: u32,       // Gesamtsumme reduziert
+    #[serde(skip_serializing_if = "Option::is_none")]
+    items: Option<Vec<ReduceItem>>, // jede Eingabe mit Wert
+    total: u32, // Gesamtsumme reduziert
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_chain: Option<Vec<String>>,
 }
 
-async fn reduce_handler(Query(params): Query<ReduceParams>) -> Json<ReduceResponse> {
-    if params.input.trim().is_empty() {
-        return Json(ReduceResponse { values: vec![], total: 0 });
-    }
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+async fn reduce_handler(
+    Query(params): Query<ReduceParams>,
+) -> Result<Json<ReduceResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let input = params
+        .input
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "input parameter missing".into(),
+                }),
+            )
+        })?;
 
     // Eingaben per Komma trennen
-    let inputs: Vec<&str> = params.input.split(',').map(|s| s.trim()).collect();
+    let inputs: Vec<&str> = input
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if inputs.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "no valid inputs provided".into(),
+            }),
+        ));
+    }
 
     let mut results = Vec::new();
-    for word in inputs {
-        results.push(reduce_number_verbose(word, false));
+    let mut items = Vec::new();
+
+    for word in &inputs {
+        let (value, chain) = reduce_number_steps(word);
+        results.push(value);
+        if !params.only_total {
+            items.push(ReduceItem {
+                value,
+                length: if params.length {
+                    Some(word.chars().count())
+                } else {
+                    None
+                },
+                chain: if params.debug { Some(chain) } else { None },
+            });
+        }
     }
 
     // Gesamtsumme berechnen
-    let total = reduce_number_verbose(&results.iter().sum::<u32>().to_string(), false);
+    let sum: u32 = results.iter().sum();
+    let (total, total_chain) = if params.debug {
+        let (val, chain) = reduce_number_steps(&sum.to_string());
+        (val, Some(chain))
+    } else {
+        (reduce_number_verbose(&sum.to_string(), false), None)
+    };
 
-    Json(ReduceResponse { values: results, total })
+    let response = ReduceResponse {
+        items: if params.only_total { None } else { Some(items) },
+        total,
+        total_chain,
+    };
+
+    Ok(Json(response))
 }
 
 #[derive(Serialize)]
@@ -58,8 +134,44 @@ async fn lookup_handler(
 }
 
 #[derive(Deserialize)]
+struct LookupParams {
+    numbers: String,
+}
+
+#[derive(Serialize)]
+struct LookupItem {
+    number: u32,
+    meaning: String,
+}
+
+#[derive(Serialize)]
+struct LookupListResponse {
+    items: Vec<LookupItem>,
+}
+
+async fn lookup_multi_handler(
+    Query(params): Query<LookupParams>,
+    State(state): State<AppState>,
+) -> Json<LookupListResponse> {
+    let mut items = Vec::new();
+    for part in params.numbers.split(',') {
+        let s = part.trim();
+        if s.is_empty() {
+            continue;
+        }
+        if let Ok(n) = s.parse::<u32>() {
+            let meaning = lookup(n, &state.map).to_string();
+            items.push(LookupItem { number: n, meaning });
+        }
+    }
+    Json(LookupListResponse { items })
+}
+
+#[derive(Deserialize)]
 struct DateParams {
     range: String,
+    #[serde(default)]
+    debug: bool,
 }
 
 #[derive(Serialize)]
@@ -68,6 +180,8 @@ struct DateItem {
     date: String,
     value: u32,
     meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -78,20 +192,23 @@ struct DateResponse {
 async fn date_handler(
     Query(params): Query<DateParams>,
     State(state): State<AppState>,
-) -> Result<Json<DateResponse>, axum::http::StatusCode> {
-    let offsets = parse_range(&params.range).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+) -> Result<Json<DateResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let offsets = parse_range(&params.range)
+        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
     let today = Local::now().date_naive();
     let mut dates = Vec::new();
     for off in offsets {
         let date = today + Duration::days(off as i64);
         let date_str = date.format("%d.%m.%Y").to_string();
-        let num = reduce_number_verbose(&date.format("%d%m%Y").to_string(), false);
+        let raw = date.format("%d%m%Y").to_string();
+        let (num, chain) = reduce_number_steps(&raw);
         let meaning = lookup(num, &state.map).to_string();
         dates.push(DateItem {
             offset: off,
             date: date_str,
             value: num,
             meaning,
+            chain: if params.debug { Some(chain) } else { None },
         });
     }
     Ok(Json(DateResponse { dates }))
@@ -104,6 +221,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/reduce", get(reduce_handler))
+        .route("/lookup", get(lookup_multi_handler))
         .route("/lookup/:number", get(lookup_handler))
         .route("/date", get(date_handler))
         .with_state(state);
