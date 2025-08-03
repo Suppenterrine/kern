@@ -69,6 +69,13 @@ fn main() {
                 .help("Zeigt die vollständige Reduktionskette für jede Eingabe"),
         )
         .arg(
+            Arg::new("total")
+                .short('t')
+                .long("total")
+                .action(ArgAction::SetTrue)
+                .help("Zeigt die Gesamtsumme aller Ergebnisse (reduziert)"),
+        )
+        .arg(
             Arg::new("ARGS")
                 .num_args(1..)
                 .help("Strings oder Zahlen zur Quersummen-Berechnung"),
@@ -138,15 +145,19 @@ fn main() {
     }
 
     /* ­--length Flag gesetzt? -------------------------------------------- */
+    let show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
     let debug = matches.get_flag("debug");
 
     /* Standard-Modus: Strings berechnen ---------------------------------- */
     if let Some(args) = matches.get_many::<String>("ARGS") {
+        let mut results = Vec::new(); // ← Ergebnisse sammeln
+
         for arg in args {
             if debug {
                 // Debugmodus → nur Reduktionskette
-                reduce_number_verbose(arg, true);
+                let val = reduce_number_verbose(arg, true);
+                results.push(val);
             } else {
                 // Normale Ausgabe
                 let reduced = reduce_number_verbose(arg, false);
@@ -156,6 +167,28 @@ fn main() {
                 } else {
                     println!("{arg}: {reduced}");
                 }
+                results.push(reduced);
+            }
+        }
+
+        // Nach allen Argumenten → Gesamtsumme
+        if show_total {
+            let sum: u32 = results.iter().sum();
+            if debug {
+                // Gesamtkette aus den Einzelergebnissen zeigen
+                let parts: Vec<String> = results.iter().map(|v| v.to_string()).collect();
+                println!(
+                    "\n→ Gesamtsumme: ({}) = {}",
+                    parts.join("+"),
+                    sum
+                );
+            }
+
+            let reduced_total = reduce_number_verbose(&sum.to_string(), debug);
+            if debug {
+                println!("→ Gesamtsumme: {sum} → {reduced_total}");
+            } else {
+                println!("Gesamtsumme: {sum} → {reduced_total}");
             }
         }
     } else {
