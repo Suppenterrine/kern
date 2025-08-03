@@ -2,8 +2,7 @@ use std::{path::Path};
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use prettytable::{Table, row};
-mod lib;                  // neu – bindet src/lib.rs ein
-use lib::core::*;         // dann kannst du char_to_value, … direkt verwenden
+use kern::core::*;
 
 
 fn main() {

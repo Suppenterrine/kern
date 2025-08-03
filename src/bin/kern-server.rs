@@ -1,7 +1,7 @@
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     routing::get,
-    Json, Router,
 };
 use chrono::{Duration, Local};
 use kern::core::{Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_verbose};
@@ -20,12 +20,27 @@ struct ReduceParams {
 
 #[derive(Serialize)]
 struct ReduceResponse {
-    value: u32,
+    values: Vec<u32>, // jede Eingabe mit Wert
+    total: u32,       // Gesamtsumme reduziert
 }
 
 async fn reduce_handler(Query(params): Query<ReduceParams>) -> Json<ReduceResponse> {
-    let value = reduce_number_verbose(&params.input, false);
-    Json(ReduceResponse { value })
+    if params.input.trim().is_empty() {
+        return Json(ReduceResponse { values: vec![], total: 0 });
+    }
+
+    // Eingaben per Komma trennen
+    let inputs: Vec<&str> = params.input.split(',').map(|s| s.trim()).collect();
+
+    let mut results = Vec::new();
+    for word in inputs {
+        results.push(reduce_number_verbose(word, false));
+    }
+
+    // Gesamtsumme berechnen
+    let total = reduce_number_verbose(&results.iter().sum::<u32>().to_string(), false);
+
+    Json(ReduceResponse { values: results, total })
 }
 
 #[derive(Serialize)]
@@ -64,8 +79,7 @@ async fn date_handler(
     Query(params): Query<DateParams>,
     State(state): State<AppState>,
 ) -> Result<Json<DateResponse>, axum::http::StatusCode> {
-    let offsets =
-        parse_range(&params.range).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
+    let offsets = parse_range(&params.range).map_err(|_| axum::http::StatusCode::BAD_REQUEST)?;
     let today = Local::now().date_naive();
     let mut dates = Vec::new();
     for off in offsets {
