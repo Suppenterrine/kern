@@ -96,7 +96,10 @@ fn main() {
                 }
 
                 match s.parse::<u32>() {
-                    Ok(n) => lookup_row(&mut t, n, &map),
+                    Ok(n) => {
+                        let text = lookup(n, &map);
+                        t.add_row(row![n, text]);
+                    },
                     Err(_) => eprintln!("Ignoriere ungültigen Wert: {s}"),
                 }
             }

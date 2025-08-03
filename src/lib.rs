@@ -2,7 +2,6 @@
 
 pub mod core {
     use chrono::{Local, NaiveDate};
-    use prettytable::{Table, row};
     use regex::Regex;
     use serde::Deserialize;
     use std::{collections::HashMap, fs, path::Path};
@@ -27,12 +26,10 @@ pub mod core {
         serde_yaml::from_str(&yaml).expect("YAML konnte nicht geparst werden")
     }
 
-    pub fn lookup_row(table: &mut Table, zahl: u32, map: &HashMap<u32, Bedeutung>) {
-        if let Some(txt) = map.get(&zahl).and_then(|b| b.text.as_deref()) {
-            table.add_row(row![zahl, txt]);
-        } else {
-            table.add_row(row![zahl, "– keine Bedeutung –"]);
-        }
+    pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
+        map.get(&zahl)
+            .and_then(|b| b.text.as_deref())
+            .unwrap_or("– keine Bedeutung –")
     }
 
     pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
