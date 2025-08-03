@@ -1,3 +1,4 @@
+```
 KERN(1)            System Tools for Symbolische Struktur            KERN(1)
 
 NAME
@@ -34,3 +35,4 @@ AUTHORS
 
 STATUS
     HALTEKRAFT: Stabil | Schnittstelle: Offen
+```
