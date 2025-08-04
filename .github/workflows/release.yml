@@ -87,5 +87,9 @@ jobs:
 
       - name: Build & push Docker image
         run: |
-          docker build --build-arg BUILD_BIN=kern-server -t ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }} .
+          docker build --build-arg BUILD_BIN=kern-server \
+            -t ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }} \
+            -t ${{ secrets.DOCKER_USERNAME }}/kern-server:latest \
+            .
           docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }}
+          docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:latest
