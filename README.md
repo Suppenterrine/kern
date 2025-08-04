@@ -27,6 +27,10 @@ OPTIONS
     -h, --help       Ja. Es gibt Hilfe.
     --version        Zeigt Versionsinfo und verlässt das Ritual.
 
+SUBCOMMANDS
+    weather          Aktuelles Wetter (Open-Meteo)
+    sun              Sonnenstand (Azimut/Elevation)
+
 SEE ALSO
     bedeutungen.yaml, /resonanzkern, Wickfeld_507
 

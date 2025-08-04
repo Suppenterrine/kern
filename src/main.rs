@@ -1,7 +1,8 @@
-use chrono::{Duration, Local};
-use clap::{Arg, ArgAction, Command};
+use chrono::{DateTime, Duration, Local, Utc};
+use clap::{value_parser, Arg, ArgAction, Command};
 use prettytable::{Table, row};
 use kern::core::*;
+use serde_json;
 
 
 fn main() {
@@ -78,7 +79,73 @@ fn main() {
                 .num_args(1..)
                 .help("Strings oder Zahlen zur Quersummen-Berechnung"),
         )
+        .subcommand(
+            Command::new("weather")
+                .about("Aktuelles Wetter")
+                .arg(
+                    Arg::new("lat")
+                        .long("lat")
+                        .required(true)
+                        .value_parser(value_parser!(f64)),
+                )
+                .arg(
+                    Arg::new("lon")
+                        .long("lon")
+                        .required(true)
+                        .value_parser(value_parser!(f64)),
+                ),
+        )
+        .subcommand(
+            Command::new("sun")
+                .about("Sonnenstand")
+                .arg(
+                    Arg::new("lat")
+                        .long("lat")
+                        .required(true)
+                        .value_parser(value_parser!(f64)),
+                )
+                .arg(
+                    Arg::new("lon")
+                        .long("lon")
+                        .required(true)
+                        .value_parser(value_parser!(f64)),
+                )
+                .arg(
+                    Arg::new("time")
+                        .long("time")
+                        .value_name("ISO8601"),
+                ),
+        )
         .get_matches();
+
+    if let Some((cmd, sub_m)) = matches.subcommand() {
+        match cmd {
+            "weather" => {
+                let lat = *sub_m.get_one::<f64>("lat").unwrap();
+                let lon = *sub_m.get_one::<f64>("lon").unwrap();
+                match weather::fetch_current_weather(lat, lon) {
+                    Ok(w) => println!("{}", serde_json::to_string_pretty(&w).unwrap()),
+                    Err(e) => eprintln!("Fehler: {e}"),
+                }
+                return;
+            }
+            "sun" => {
+                let lat = *sub_m.get_one::<f64>("lat").unwrap();
+                let lon = *sub_m.get_one::<f64>("lon").unwrap();
+                let dt = if let Some(t) = sub_m.get_one::<String>("time") {
+                    DateTime::parse_from_rfc3339(t)
+                        .map(|d| d.with_timezone(&Utc))
+                        .unwrap()
+                } else {
+                    Utc::now()
+                };
+                let pos = sun::solar_position(lat, lon, dt);
+                println!("azimuth: {:.2}, elevation: {:.2}", pos.azimuth, pos.elevation);
+                return;
+            }
+            _ => {}
+        }
+    }
 
     /* --lookup: sofort Tabelle ausgeben ---------------------------------- */
     if let Some(list) = matches.get_many::<String>("lookup") {
