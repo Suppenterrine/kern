@@ -163,4 +163,81 @@ pub mod core {
             .map(|v| vec![v])
             .map_err(|_| "Ungültige Range-Angabe".into())
     }
+
+    // ---------------------------------------------------------------------
+    // Wetter-Modul
+    // ---------------------------------------------------------------------
+    pub mod weather {
+        use reqwest::blocking::Client;
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Debug, Deserialize, Serialize)]
+        pub struct CurrentWeather {
+            pub temperature: f64,
+            pub windspeed: f64,
+            #[serde(rename = "winddirection")]
+            pub winddirection_deg: f64,
+            pub weathercode: i32,
+            pub time: String,
+        }
+
+        #[derive(Deserialize)]
+        struct ApiResponse {
+            current_weather: CurrentWeather,
+        }
+
+        #[derive(Serialize)]
+        struct QueryParams {
+            latitude: f64,
+            longitude: f64,
+            current_weather: bool,
+        }
+
+        pub fn deg_to_compass(deg: f64) -> &'static str {
+            const DIRS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+            let idx = ((deg + 22.5) % 360.0 / 45.0).floor() as usize;
+            DIRS[idx % 8]
+        }
+
+        pub fn fetch_current_weather(lat: f64, lon: f64) -> Result<CurrentWeather, reqwest::Error> {
+            fetch_current_weather_from(lat, lon, "https://api.open-meteo.com")
+        }
+
+        pub fn fetch_current_weather_from(lat: f64, lon: f64, base: &str) -> Result<CurrentWeather, reqwest::Error> {
+            let url = format!("{base}/v1/forecast");
+            let client = Client::new();
+            let params = QueryParams { latitude: lat, longitude: lon, current_weather: true };
+            let resp: ApiResponse = client
+                .get(&url)
+                .query(&params)
+                .send()?
+                .json()?;
+            Ok(resp.current_weather)
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Sonnenstand-Modul
+    // ---------------------------------------------------------------------
+    pub mod sun {
+        use chrono::{DateTime, Utc};
+        use serde::Serialize;
+
+        #[derive(Debug, Serialize)]
+        pub struct SolarPos {
+            pub azimuth: f64,
+            pub elevation: f64,
+        }
+
+        pub fn solar_position(lat: f64, lon: f64, dt: DateTime<Utc>) -> SolarPos {
+            use suncalc::{get_position, Timestamp};
+            let ts = Timestamp(dt.timestamp_millis());
+            let pos = get_position(ts, lat, lon);
+            let az = (pos.azimuth.to_degrees() + 180.0) % 360.0;
+            SolarPos {
+                azimuth: az,
+                elevation: pos.altitude.to_degrees(),
+            }
+        }
+    }
 }
