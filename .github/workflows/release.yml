@@ -32,7 +32,28 @@ jobs:
             target/release/kern.exe
           token: ${{ secrets.GITHUB_TOKEN }}
 
-# ---------- 2) Linux-Server-Binary + Docker --------------------------------
+# ---------- 2) Windows-Server-Binary--------- --------------------------------
+  build-server-win:
+    if: contains(github.event.release.body, '[SERVER]')
+    runs-on: windows-latest
+    needs: build-cli-win
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust nightly
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          target: x86_64-pc-windows-msvc
+          default: true
+      - name: Build kern-server.exe (Windows)
+        run: cargo build --release --bin kern-server
+      - name: Upload kern-server.exe (Windows) to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/release/kern-server.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+# ---------- 3) Linux-Server-Binary + Docker --------------------------------
   build-server-linux:
     if: contains(github.event.release.body, '[SERVER]')
     needs: build-cli-win          # erst CLI, dann Server – Reihenfolge optional
