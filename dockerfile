@@ -2,6 +2,8 @@
 FROM rustlang/rust:nightly-slim AS builder
 
 WORKDIR /app
+# Install dependencies needed for openssl-sys
+RUN apt update && apt install -y pkg-config libssl-dev
 COPY . .
 
 # Build nur gewünschten Binärnamen
