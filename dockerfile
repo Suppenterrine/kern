@@ -1,5 +1,5 @@
 # ===== Builder (Nightly, edition 2024) =====================================
-FROM rustlang/rust:nightly-slim AS builder   # <-- richtige Registry
+FROM rustlang/rust:nightly-slim AS builder
 
 WORKDIR /app
 COPY . .
