@@ -1,8 +1,16 @@
-FROM rust:1.78 as builder
+# ===== Builder (Nightly für edition 2024) =========================
+ARG RUST_VERSION=nightly
+FROM rust:${RUST_VERSION}-slim AS builder
+
 WORKDIR /app
 COPY . .
-RUN cargo build --release --bin kern-server
 
+# Build nur gewünschten Binärnamen
+ARG BUILD_BIN=kern-server
+RUN cargo build --release --bin ${BUILD_BIN}
+
+# ===== Runtime (schlank) ==========================================
 FROM debian:buster-slim
-COPY --from=builder /app/target/release/kern-server /usr/local/bin/kern-server
-CMD ["kern-server"]
+ARG BUILD_BIN=kern-server
+COPY --from=builder /app/target/release/${BUILD_BIN} /usr/local/bin/${BUILD_BIN}
+ENTRYPOINT ["/usr/local/bin/kern-server"]

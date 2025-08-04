@@ -1,65 +1,70 @@
-name: Release Binary and/or Docker
+name: KERN Release
 
 on:
   release:
     types: [published]
 
-jobs:
-  build-binaries:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [x86_64-unknown-linux-gnu]  # erweiterbar
-    env:
-      CARGO_TERM_COLOR: always
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+env:
+  CARGO_TERM_COLOR: always
 
-      - name: Install Rust
+# ---------- 1) Windows-CLI-Binary ------------------------------------------
+jobs:
+  build-cli-win:
+    if: contains(github.event.release.body, '[KERN]')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (nightly, MSVC)
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+          toolchain: nightly
+          target: x86_64-pc-windows-msvc
+          default: true
 
-      - name: Build Kern Binary
-        if: contains(github.event.release.body, '[KERN]')
+      - name: Build kern.exe
         run: cargo build --release
 
-      - name: Build Kern-Server Binary
-        if: contains(github.event.release.body, '[SERVER]')
-        run: cargo build --release --bin kern-server
-
-      - name: Upload Kern Binary
-        if: contains(github.event.release.body, '[KERN]')
+      - name: Upload kern.exe to Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            target/release/kern
+            target/release/kern.exe
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Kern-Server Binary
-        if: contains(github.event.release.body, '[SERVER]')
+# ---------- 2) Linux-Server-Binary + Docker --------------------------------
+  build-server-linux:
+    if: contains(github.event.release.body, '[SERVER]')
+    needs: build-cli-win          # erst CLI, dann Server – Reihenfolge optional
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Nightly wegen edition2024
+      - name: Install Rust (nightly)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          default: true
+
+      - name: Build kern-server (Linux)
+        run: cargo build --release --bin kern-server
+
+      - name: Upload kern-server (Linux) to Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             target/release/kern-server
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-  docker:
-    needs: build-binaries
-    runs-on: ubuntu-latest
-    if: contains(github.event.release.body, '[SERVER]')
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
+      # --- Docker (Nightly)
       - name: Login to DockerHub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & Push Docker Image
+      - name: Build & push Docker image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }} -f Dockerfile .
+          docker build --build-arg BUILD_BIN=kern-server -t ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }} .
           docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }}
