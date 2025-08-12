@@ -40,3 +40,10 @@ AUTHORS
 STATUS
     HALTEKRAFT: Stabil | Schnittstelle: Offen
 ```
+## Refactor
+
+The gematria logic was modularised. Pure helper functions now live in
+`reduction/` while concrete cipher strategies can be found in
+`ciphers/`.  `calculate_all` offers a simple façade that evaluates all
+registered ciphers.  This separation keeps `lib.rs` lightweight and makes
+future parallelisation with Rayon straightforward.

@@ -1,10 +1,15 @@
 use chrono::{Duration, Local, Utc};
 use clap::{Arg, ArgAction, Command, value_parser};
-use kern::core::*;
+use kern::{
+    calculate_all,
+    ciphers::ALL_CIPHERS,
+    core::{load_bedeutungen, lookup, parse_range, reduce_number_steps, sky},
+};
 use prettytable::{Table, row};
 use serde_json;
 
 fn main() {
+    let _ = ALL_CIPHERS;
     let version = env!("CARGO_PKG_VERSION");
     let about = format!(
         r#"
@@ -160,12 +165,19 @@ fn main() {
 
                 for off in offsets {
                     let date = today + Duration::days(off as i64);
-
-                    // Debug/Normal trennen
                     let date_str = date.format("%d%m%Y").to_string();
-                    let num = reduce_number_verbose(&date_str, debug);
 
-                    if !debug {
+                    if debug {
+                        let (_, chain) = reduce_number_steps(&date_str);
+                        for line in chain {
+                            println!("{line}");
+                        }
+                    } else {
+                        let num = calculate_all(&date_str)
+                            .iter()
+                            .find(|(n, _)| *n == "Ordinal")
+                            .map(|(_, v)| *v)
+                            .unwrap_or(0);
                         let text = map.get(&num).and_then(|b| b.text.as_deref()).unwrap_or("–");
                         t.add_row(row![
                             format!("{:+}", off),
@@ -196,18 +208,25 @@ fn main() {
         for arg in args {
             if debug {
                 // Debugmodus → nur Reduktionskette
-                let val = reduce_number_verbose(arg, true);
+                let (val, chain) = reduce_number_steps(arg);
+                for line in chain {
+                    println!("{line}");
+                }
                 results.push(val);
             } else {
                 // Normale Ausgabe
-                let reduced = reduce_number_verbose(arg, false);
+                let val = calculate_all(arg)
+                    .iter()
+                    .find(|(n, _)| *n == "Ordinal")
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0);
                 if show_length {
                     let len = arg.chars().count();
-                    println!("{arg}: {reduced} ({len})");
+                    println!("{arg}: {val} ({len})");
                 } else {
-                    println!("{arg}: {reduced}");
+                    println!("{arg}: {val}");
                 }
-                results.push(reduced);
+                results.push(val);
             }
         }
 
@@ -218,12 +237,17 @@ fn main() {
                 // Gesamtkette aus den Einzelergebnissen zeigen
                 let parts: Vec<String> = results.iter().map(|v| v.to_string()).collect();
                 println!("\n→ Gesamtsumme: ({}) = {}", parts.join("+"), sum);
-            }
-
-            let reduced_total = reduce_number_verbose(&sum.to_string(), debug);
-            if debug {
+                let (reduced_total, chain) = reduce_number_steps(&sum.to_string());
+                for line in chain {
+                    println!("{line}");
+                }
                 println!("→ Gesamtsumme: {sum} → {reduced_total}");
             } else {
+                let reduced_total = calculate_all(&sum.to_string())
+                    .iter()
+                    .find(|(n, _)| *n == "Ordinal")
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0);
                 println!("Gesamtsumme: {sum} → {reduced_total}");
             }
         }

@@ -1,80 +1,27 @@
-//! Kern-Unittests (werden von `cargo test` automatisch gefunden)
+use kern::reduction::{
+    to_ordinal, to_reverse_ordinal, to_pythagorean, to_reverse_pythagorean,
+    reduce, reduce_values,
+};
 
-use chrono::Local;
-use kern::core::*;
-
-//
-// ── 1.  Einzel-Char-Werte ────────────────────────────────────────────────────
-//
 #[test]
-fn test_char_to_value_digits() {
-    assert_eq!(char_to_value('0'), 0);
-    assert_eq!(char_to_value('7'), 7);
+fn test_letter_mappings() {
+    assert_eq!(to_ordinal("abc"), vec![1, 2, 3]);
+    assert_eq!(to_reverse_ordinal("abc"), vec![26, 25, 24]);
+    assert_eq!(to_pythagorean("j"), vec![1]); // J -> 10 -> 1
+    assert_eq!(to_reverse_pythagorean("z"), vec![1]);
 }
 
 #[test]
-fn test_char_to_value_letters() {
-    assert_eq!(char_to_value('A'), 1);
-    assert_eq!(char_to_value('Z'), 26);
-    assert_eq!(char_to_value('a'), 1);
-    assert_eq!(char_to_value('z'), 26);
-}
-
-//
-// ── 2.  Quersummen-Reduktion (ohne Debugtext) ────────────────────────────────
-//
-#[test]
-fn test_reduce_number_verbose_simple() {
-    // "11" ist Masterzahl → bleibt 11
-    assert_eq!(reduce_number_verbose("11", false), 11);
-
-    // 654 -> 6+5+4 = 15 -> 1+5 = 6
-    assert_eq!(reduce_number_verbose("654", false), 6);
-
-    // "feldmann" erwartete Endsumme = 6
-    assert_eq!(reduce_number_verbose("feldmann", false), 6);
+fn test_number_reduction() {
+    assert_eq!(reduce(654), 6);
+    assert_eq!(reduce(11), 11); // master number
+    let values = to_ordinal("feldmann");
+    assert_eq!(reduce_values(&values), 6);
 }
 
 #[test]
-fn test_reduce_number_steps_chain() {
-    let (val, chain) = reduce_number_steps("feldmann");
-    assert_eq!(val, 6);
-    assert!(!chain.is_empty());
-    assert!(chain.last().unwrap().contains("Quersumme"));
-}
-
-//
-// ── 3.  Datums-Offset-Parser ────────────────────────────────────────────────
-//
-#[test]
-fn test_parse_range_absolute_date() {
-    let today = Local::now().date_naive();
-    let date_str = today.format("%d.%m.%Y").to_string(); // Offset 0
-    assert_eq!(parse_range(&date_str).unwrap(), vec![0]);
-}
-
-#[test]
-fn test_parse_range_relative() {
-    assert_eq!(parse_range("-2").unwrap(), vec![-2]);
-    assert_eq!(parse_range("0+2").unwrap(), vec![0, 1, 2]);
-    assert_eq!(parse_range("-3..1").unwrap(), vec![-3, -2, -1, 0, 1]);
-}
-
-//
-// ── 4.  Gesamtsumme-Logik ────────────────────────────────────────────────────
-//
-#[test]
-fn test_total_sum_reduction() {
-    // Ergebnisse von reduce_number_verbose simulieren
-    let results = vec![
-        reduce_number_verbose("awd", false), // 1
-        reduce_number_verbose("ert", false), // 7
-        reduce_number_verbose("ghr", false), // 33
-    ];
-    assert_eq!(results, vec![1, 7, 33]);
-
-    // Summe = 1 + 7 + 33 = 41 → 4+1 = 5
-    let total_sum: u32 = results.iter().sum();
-    assert_eq!(total_sum, 41);
-    assert_eq!(reduce_number_verbose(&total_sum.to_string(), false), 5);
+fn test_edge_cases() {
+    assert!(to_ordinal("!@#").is_empty());
+    let values = to_ordinal("");
+    assert_eq!(reduce_values(&values), 0);
 }

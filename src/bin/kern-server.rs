@@ -5,9 +5,12 @@ use axum::{
     routing::get,
 };
 use chrono::{DateTime, Duration, Local, Utc};
-use kern::core::{
-    Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
-    weather, sun,
+use kern::{
+    calculate_all,
+    ciphers::ALL_CIPHERS,
+    core::{
+        Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, weather, sun,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -87,9 +90,18 @@ async fn reduce_handler(
     let mut items = Vec::new();
 
     for word in &inputs {
-        let (value, chain) = reduce_number_steps(word);
+        let value = calculate_all(word)
+            .iter()
+            .find(|(n, _)| *n == "Ordinal")
+            .map(|(_, v)| *v)
+            .unwrap_or(0);
         results.push(value);
         if !params.only_total {
+            let chain = if params.debug {
+                Some(reduce_number_steps(word).1)
+            } else {
+                None
+            };
             items.push(ReduceItem {
                 value,
                 length: if params.length {
@@ -97,7 +109,7 @@ async fn reduce_handler(
                 } else {
                     None
                 },
-                chain: if params.debug { Some(chain) } else { None },
+                chain,
             });
         }
     }
@@ -108,7 +120,12 @@ async fn reduce_handler(
         let (val, chain) = reduce_number_steps(&sum.to_string());
         (val, Some(chain))
     } else {
-        (reduce_number_verbose(&sum.to_string(), false), None)
+        let val = calculate_all(&sum.to_string())
+            .iter()
+            .find(|(n, _)| *n == "Ordinal")
+            .map(|(_, v)| *v)
+            .unwrap_or(0);
+        (val, None)
     };
 
     let response = ReduceResponse {
@@ -202,14 +219,23 @@ async fn date_handler(
         let date = today + Duration::days(off as i64);
         let date_str = date.format("%d.%m.%Y").to_string();
         let raw = date.format("%d%m%Y").to_string();
-        let (num, chain) = reduce_number_steps(&raw);
+        let num = calculate_all(&raw)
+            .iter()
+            .find(|(n, _)| *n == "Ordinal")
+            .map(|(_, v)| *v)
+            .unwrap_or(0);
+        let chain = if params.debug {
+            Some(reduce_number_steps(&raw).1)
+        } else {
+            None
+        };
         let meaning = lookup(num, &state.map).to_string();
         dates.push(DateItem {
             offset: off,
             date: date_str,
             value: num,
             meaning,
-            chain: if params.debug { Some(chain) } else { None },
+            chain,
         });
     }
     Ok(Json(DateResponse { dates }))
@@ -260,6 +286,7 @@ async fn sun_handler(
 
 #[tokio::main]
 async fn main() {
+    let _ = ALL_CIPHERS;
     let map = load_bedeutungen();
     let state = AppState { map: Arc::new(map) };
 
