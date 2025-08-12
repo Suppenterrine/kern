@@ -1,9 +1,8 @@
-use chrono::{DateTime, Duration, Local, Utc};
-use clap::{value_parser, Arg, ArgAction, Command};
-use prettytable::{Table, row};
+use chrono::{Duration, Local, Utc};
+use clap::{Arg, ArgAction, Command, value_parser};
 use kern::core::*;
+use prettytable::{Table, row};
 use serde_json;
-
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION");
@@ -80,24 +79,8 @@ fn main() {
                 .help("Strings oder Zahlen zur Quersummen-Berechnung"),
         )
         .subcommand(
-            Command::new("weather")
-                .about("Aktuelles Wetter")
-                .arg(
-                    Arg::new("lat")
-                        .long("lat")
-                        .required(true)
-                        .value_parser(value_parser!(f64)),
-                )
-                .arg(
-                    Arg::new("lon")
-                        .long("lon")
-                        .required(true)
-                        .value_parser(value_parser!(f64)),
-                ),
-        )
-        .subcommand(
-            Command::new("sun")
-                .about("Sonnenstand")
+            Command::new("sky")
+                .about("Wetter + Sonnenstand kombiniert")
                 .arg(
                     Arg::new("lat")
                         .long("lat")
@@ -111,36 +94,27 @@ fn main() {
                         .value_parser(value_parser!(f64)),
                 )
                 .arg(
-                    Arg::new("time")
-                        .long("time")
-                        .value_name("ISO8601"),
+                    Arg::new("time").long("time").value_name("ISO8601"), // optional, z.B. 2025-08-12T07:30:00+00:00
                 ),
         )
         .get_matches();
 
     if let Some((cmd, sub_m)) = matches.subcommand() {
         match cmd {
-            "weather" => {
-                let lat = *sub_m.get_one::<f64>("lat").unwrap();
-                let lon = *sub_m.get_one::<f64>("lon").unwrap();
-                match weather::fetch_current_weather(lat, lon) {
-                    Ok(w) => println!("{}", serde_json::to_string_pretty(&w).unwrap()),
-                    Err(e) => eprintln!("Fehler: {e}"),
-                }
-                return;
-            }
-            "sun" => {
+            "sky" => {
                 let lat = *sub_m.get_one::<f64>("lat").unwrap();
                 let lon = *sub_m.get_one::<f64>("lon").unwrap();
                 let dt = if let Some(t) = sub_m.get_one::<String>("time") {
-                    DateTime::parse_from_rfc3339(t)
+                    chrono::DateTime::parse_from_rfc3339(t)
                         .map(|d| d.with_timezone(&Utc))
                         .unwrap()
                 } else {
                     Utc::now()
                 };
-                let pos = sun::solar_position(lat, lon, dt);
-                println!("azimuth: {:.2}, elevation: {:.2}", pos.azimuth, pos.elevation);
+                match sky::report(lat, lon, Some(dt)) {
+                    Ok(r) => println!("{}", serde_json::to_string_pretty(&r).unwrap()),
+                    Err(e) => eprintln!("Fehler: {e}"),
+                }
                 return;
             }
             _ => {}
@@ -164,7 +138,7 @@ fn main() {
                     Ok(n) => {
                         let text = lookup(n, &map);
                         t.add_row(row![n, text]);
-                    },
+                    }
                     Err(_) => eprintln!("Ignoriere ungültigen Wert: {s}"),
                 }
             }
@@ -172,8 +146,6 @@ fn main() {
         t.printstd();
         return;
     }
-
-    
 
     let debug = matches.get_flag("debug");
 
@@ -245,11 +217,7 @@ fn main() {
             if debug {
                 // Gesamtkette aus den Einzelergebnissen zeigen
                 let parts: Vec<String> = results.iter().map(|v| v.to_string()).collect();
-                println!(
-                    "\n→ Gesamtsumme: ({}) = {}",
-                    parts.join("+"),
-                    sum
-                );
+                println!("\n→ Gesamtsumme: ({}) = {}", parts.join("+"), sum);
             }
 
             let reduced_total = reduce_number_verbose(&sum.to_string(), debug);

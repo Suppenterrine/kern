@@ -4,7 +4,7 @@ pub mod core {
     use chrono::{Local, NaiveDate};
     use regex::Regex;
     use serde::Deserialize;
-    use std::{collections::HashMap};
+    use std::collections::HashMap;
 
     #[derive(Debug, Deserialize)]
     pub struct Bedeutung {
@@ -181,6 +181,29 @@ pub mod core {
             pub time: String,
         }
 
+        #[derive(Debug, Serialize)]
+        pub struct CurrentWeatherView {
+            pub temperature: f64,
+            pub windspeed: f64,
+            pub winddirection_deg: f64,
+            pub winddirection: String,
+            pub weathercode: i32,
+            pub time: String,
+        }
+
+        impl CurrentWeather {
+            pub fn to_view(&self) -> CurrentWeatherView {
+                CurrentWeatherView {
+                    temperature: self.temperature,
+                    windspeed: self.windspeed,
+                    winddirection_deg: self.winddirection_deg,
+                    winddirection: deg_to_compass(self.winddirection_deg).to_string(),
+                    weathercode: self.weathercode,
+                    time: self.time.clone(),
+                }
+            }
+        }
+
         #[derive(Deserialize)]
         struct ApiResponse {
             current_weather: CurrentWeather,
@@ -194,24 +217,38 @@ pub mod core {
         }
 
         pub fn deg_to_compass(deg: f64) -> &'static str {
-            const DIRS: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
-            let idx = ((deg + 22.5) % 360.0 / 45.0).floor() as usize;
-            DIRS[idx % 8]
+            const DIRS: [&str; 16] = [
+                "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W",
+                "WNW", "NW", "NNW",
+            ];
+            let idx = ((deg + 11.25) % 360.0 / 22.5).floor() as usize;
+            DIRS[idx % 16]
         }
 
         pub fn fetch_current_weather(lat: f64, lon: f64) -> Result<CurrentWeather, reqwest::Error> {
             fetch_current_weather_from(lat, lon, "https://api.open-meteo.com")
         }
 
-        pub fn fetch_current_weather_from(lat: f64, lon: f64, base: &str) -> Result<CurrentWeather, reqwest::Error> {
+        pub fn fetch_current_weather_view(
+            lat: f64,
+            lon: f64,
+        ) -> Result<CurrentWeatherView, reqwest::Error> {
+            fetch_current_weather(lat, lon).map(|cw| cw.to_view())
+        }
+
+        pub fn fetch_current_weather_from(
+            lat: f64,
+            lon: f64,
+            base: &str,
+        ) -> Result<CurrentWeather, reqwest::Error> {
             let url = format!("{base}/v1/forecast");
             let client = Client::new();
-            let params = QueryParams { latitude: lat, longitude: lon, current_weather: true };
-            let resp: ApiResponse = client
-                .get(&url)
-                .query(&params)
-                .send()?
-                .json()?;
+            let params = QueryParams {
+                latitude: lat,
+                longitude: lon,
+                current_weather: true,
+            };
+            let resp: ApiResponse = client.get(&url).query(&params).send()?.json()?;
             Ok(resp.current_weather)
         }
     }
@@ -229,8 +266,26 @@ pub mod core {
             pub elevation: f64,
         }
 
+        #[derive(Debug, Serialize)]
+        pub struct SolarPosView {
+            pub azimuth: f64,
+            pub azimuth_compass: String,
+            pub elevation: f64,
+        }
+
+        impl SolarPos {
+            pub fn to_view(&self) -> SolarPosView {
+                let dir = super::weather::deg_to_compass(self.azimuth).to_string();
+                SolarPosView {
+                    azimuth: self.azimuth,
+                    azimuth_compass: dir,
+                    elevation: self.elevation,
+                }
+            }
+        }
+
         pub fn solar_position(lat: f64, lon: f64, dt: DateTime<Utc>) -> SolarPos {
-            use suncalc::{get_position, Timestamp};
+            use suncalc::{Timestamp, get_position};
             let ts = Timestamp(dt.timestamp_millis());
             let pos = get_position(ts, lat, lon);
             let az = (pos.azimuth.to_degrees() + 180.0) % 360.0;
@@ -238,6 +293,72 @@ pub mod core {
                 azimuth: az,
                 elevation: pos.altitude.to_degrees(),
             }
+        }
+
+        pub fn solar_position_view(lat: f64, lon: f64, dt: DateTime<Utc>) -> SolarPosView {
+            solar_position(lat, lon, dt).to_view()
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Wetter und Sonnenstand Modul kombiniert
+    // ---------------------------------------------------------------------
+    pub mod sky {
+        use super::sun;
+        use super::weather;
+        use chrono::{DateTime, Utc};
+        use serde::Serialize;
+
+        #[derive(Debug, Serialize)]
+        pub struct SkyReport {
+            pub weather: WeatherOut,
+            pub sun: SunOut,
+        }
+
+        #[derive(Debug, Serialize)]
+        pub struct WeatherOut {
+            pub temperature: f64,
+            pub windspeed: f64,
+            pub winddirection_deg: f64,
+            pub winddirection: String,
+            pub weathercode: i32,
+            pub time: String,
+        }
+
+        #[derive(Debug, Serialize)]
+        pub struct SunOut {
+            pub azimuth: f64,
+            pub azimuth_compass: String,
+            pub elevation: f64,
+        }
+
+        /// Kombinierter Report. `dt` optional; fällt sonst auf `Utc::now()` zurück.
+        pub fn report(lat: f64, lon: f64, dt: Option<DateTime<Utc>>) -> Result<SkyReport, String> {
+            let w = weather::fetch_current_weather(lat, lon)
+                .map_err(|e| format!("weather error: {e}"))?;
+
+            let t = dt.unwrap_or_else(|| Utc::now());
+            let s = sun::solar_position(lat, lon, t);
+
+            let weather_out = WeatherOut {
+                temperature: w.temperature,
+                windspeed: w.windspeed,
+                winddirection_deg: w.winddirection_deg,
+                winddirection: weather::deg_to_compass(w.winddirection_deg).to_string(),
+                weathercode: w.weathercode,
+                time: w.time,
+            };
+
+            let sun_out = SunOut {
+                azimuth: s.azimuth,
+                azimuth_compass: weather::deg_to_compass(s.azimuth).to_string(),
+                elevation: s.elevation,
+            };
+
+            Ok(SkyReport {
+                weather: weather_out,
+                sun: sun_out,
+            })
         }
     }
 }
