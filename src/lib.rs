@@ -10,6 +10,10 @@ pub mod core {
     pub struct Bedeutung {
         #[serde(alias = "bedeutung")]
         pub text: Option<String>,
+        #[serde(alias = "licht", alias = "lichtseite")]
+        pub licht: Option<String>,
+        #[serde(alias = "schatten", alias = "schattenseite")]
+        pub schatten: Option<String>,
     }
 
     pub fn char_to_value(ch: char) -> u32 {
@@ -31,7 +35,7 @@ pub mod core {
     pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
         map.get(&zahl)
             .and_then(|b| b.text.as_deref())
-            .unwrap_or("– keine Bedeutung –")
+            .unwrap_or("- keine Bedeutung -")
     }
 
     pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {

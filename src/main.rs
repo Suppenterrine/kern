@@ -1,7 +1,7 @@
 use chrono::{Duration, Local, Utc};
 use clap::{Arg, ArgAction, Command, value_parser};
 use kern::core::*;
-use prettytable::{Table, row};
+use prettytable::{Table, row, Row, Cell};
 use serde_json;
 
 fn main() {
@@ -39,6 +39,18 @@ fn main() {
                 .num_args(1..)
                 .value_delimiter(',')
                 .help("Bedeutung einer Zahl anzeigen"),
+        )
+        .arg(
+            Arg::new("licht")
+                .long("licht")
+                .action(ArgAction::SetTrue)
+                .help("Zeigt auch die Lichtseite in der Lookup-Tabelle"),
+        )
+        .arg(
+            Arg::new("schatten")
+                .long("schatten")
+                .action(ArgAction::SetTrue)
+                .help("Zeigt auch die Schattenseite in der Lookup-Tabelle"),
         )
         .arg(
             Arg::new("length")
@@ -125,7 +137,17 @@ fn main() {
     if let Some(list) = matches.get_many::<String>("lookup") {
         let map = load_bedeutungen();
         let mut t = Table::new();
-        t.add_row(row!["Zahl", "Bedeutung"]);
+        let show_licht = matches.get_flag("licht");
+        let show_schatten = matches.get_flag("schatten");
+
+        let mut header = vec![Cell::new("Zahl"), Cell::new("Bedeutung")];
+        if show_licht {
+            header.push(Cell::new("Lichtseite"));
+        }
+        if show_schatten {
+            header.push(Cell::new("Schattenseite"));
+        }
+        t.add_row(Row::new(header));
 
         for raw in list {
             for part in raw.split(',') {
@@ -137,7 +159,17 @@ fn main() {
                 match s.parse::<u32>() {
                     Ok(n) => {
                         let text = lookup(n, &map);
-                        t.add_row(row![n, text]);
+                        let entry = map.get(&n);
+                        let mut cells = vec![Cell::new(&n.to_string()), Cell::new(text)];
+                        if show_licht {
+                            let l = entry.and_then(|b| b.licht.as_deref()).unwrap_or("-");
+                            cells.push(Cell::new(l));
+                        }
+                        if show_schatten {
+                            let s = entry.and_then(|b| b.schatten.as_deref()).unwrap_or("-");
+                            cells.push(Cell::new(s));
+                        }
+                        t.add_row(Row::new(cells));
                     }
                     Err(_) => eprintln!("Ignoriere ungültigen Wert: {s}"),
                 }

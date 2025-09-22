@@ -124,25 +124,54 @@ async fn reduce_handler(
 struct LookupResponse {
     number: u32,
     meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    light: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shadow: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LookupPartsParam {
+    parts: Option<String>, // "light", "shadow", "both"
 }
 
 async fn lookup_handler(
     Path(number): Path<u32>,
+    Query(param): Query<LookupPartsParam>,
     State(state): State<AppState>,
 ) -> Json<LookupResponse> {
     let meaning = lookup(number, &state.map).to_string();
-    Json(LookupResponse { number, meaning })
+    let entry = state.map.get(&number);
+    let sel = param.parts.as_deref();
+    let want_light = matches!(sel, Some("light") | Some("both"));
+    let want_shadow = matches!(sel, Some("shadow") | Some("both"));
+    let light = if want_light {
+        entry.and_then(|b| b.licht.clone())
+    } else {
+        None
+    };
+    let shadow = if want_shadow {
+        entry.and_then(|b| b.schatten.clone())
+    } else {
+        None
+    };
+    Json(LookupResponse { number, meaning, light, shadow })
 }
 
 #[derive(Deserialize)]
 struct LookupParams {
     numbers: String,
+    parts: Option<String>, // optional: "light", "shadow", "both"
 }
 
 #[derive(Serialize)]
 struct LookupItem {
     number: u32,
     meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    light: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    shadow: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -155,6 +184,9 @@ async fn lookup_multi_handler(
     State(state): State<AppState>,
 ) -> Json<LookupListResponse> {
     let mut items = Vec::new();
+    let sel = params.parts.as_deref();
+    let want_light = matches!(sel, Some("light") | Some("both"));
+    let want_shadow = matches!(sel, Some("shadow") | Some("both"));
     for part in params.numbers.split(',') {
         let s = part.trim();
         if s.is_empty() {
@@ -162,7 +194,10 @@ async fn lookup_multi_handler(
         }
         if let Ok(n) = s.parse::<u32>() {
             let meaning = lookup(n, &state.map).to_string();
-            items.push(LookupItem { number: n, meaning });
+            let entry = state.map.get(&n);
+            let light = if want_light { entry.and_then(|b| b.licht.clone()) } else { None };
+            let shadow = if want_shadow { entry.and_then(|b| b.schatten.clone()) } else { None };
+            items.push(LookupItem { number: n, meaning, light, shadow });
         }
     }
     Json(LookupListResponse { items })

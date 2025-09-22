@@ -21,6 +21,8 @@ DESCRIPTION
 
 OPTIONS
     -l, --lookup     Zeigt Bedeutungen einzelner Zahlen.
+        --licht      Optional: Zeigt im Lookup die Lichtseite.
+        --schatten   Optional: Zeigt im Lookup die Schattenseite.
     -d, --date       Reduziert Datumswerte (relativ, absolut, range).
     -L, --length     Zeigt zusätzlich die Zeichenlänge der Tokens.
     -v, --verbose    Zeigt Reduktionsprozess im Detail.
@@ -33,6 +35,13 @@ SUBCOMMANDS
 
 SEE ALSO
     bedeutungen.yaml, /resonanzkern, Wickfeld_507
+
+API HINWEIS
+    GET /lookup/:number[?parts=light|shadow|both]
+        Liefert wie bisher { number, meaning },
+        optional zusaetzlich Felder { light, shadow }.
+    GET /lookup?numbers=1,2,3[&parts=light|shadow|both]
+        Liefert Liste von Items mit denselben optionalen Feldern.
 
 AUTHORS
     Wickfeld | FELDMANN OS Core Maintainer | Dreamcode Division
