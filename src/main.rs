@@ -2,9 +2,10 @@ use chrono::{Duration, Local, Utc};
 use clap::{Arg, ArgAction, Command, value_parser};
 use kern::core::sky;
 use kern::core::{
-    KernResult, ResultSet, Step, load_bedeutungen, lookup, parse_range, reduce_number_verbose,
+    Cipher, KernResult, ResultSet, Step, available_cipher_names, default_cipher, get_cipher,
+    load_bedeutungen, lookup, parse_range,
 };
-use prettytable::{Cell, Row, Table, row};
+use prettytable::{Cell, Row, Table};
 use serde_json;
 
 fn main() {
@@ -33,6 +34,15 @@ fn main() {
                 .num_args(1..)
                 .value_delimiter(',')
                 .help("Bedeutung einer Zahl anzeigen"),
+        )
+        .arg(
+            Arg::new("cipher")
+                .short('c')
+                .long("cipher")
+                .value_name("CIPHER")
+                .action(ArgAction::Append)
+                .value_delimiter(',')
+                .help("Cipher(s) to use (repeatable). Optionen: ordinal, reverse_ordinal, pythagorean, reverse_pythagorean (or 'all')"),
         )
         .arg(
             Arg::new("licht")
@@ -105,6 +115,44 @@ fn main() {
         )
         .get_matches();
 
+    let debug = matches.get_flag("debug");
+    let show_total = matches.get_flag("total");
+    let show_length = matches.get_flag("length");
+
+    let mut selected_ciphers: Vec<Box<dyn Cipher>> = Vec::new();
+    if let Some(values) = matches.get_many::<String>("cipher") {
+        // collect values because the iterator can only be consumed once
+        let values_vec: Vec<String> = values.map(|s| s.to_string()).collect();
+
+        // if the user requested "all" (case-insensitive), expand to all available ciphers
+        if values_vec.iter().any(|v| v.eq_ignore_ascii_case("all")) {
+            for name in available_cipher_names() {
+                if let Some(cipher) = get_cipher(&name) {
+                    selected_ciphers.push(cipher);
+                }
+            }
+        } else {
+            for value in values_vec {
+                match get_cipher(&value) {
+                    Some(cipher) => selected_ciphers.push(cipher),
+                    None => {
+                        let available = available_cipher_names().join(", ");
+                        eprintln!("Unbekannter Cipher: {value}. Verfügbar: {available}");
+                    }
+                }
+            }
+        }
+    }
+
+    if selected_ciphers.is_empty() {
+        selected_ciphers.push(default_cipher());
+    }
+
+    let cipher_labels: Vec<String> = selected_ciphers
+        .iter()
+        .map(|cipher| cipher.name().to_string())
+        .collect();
+
     if let Some((cmd, sub_m)) = matches.subcommand() {
         match cmd {
             "sky" => {
@@ -173,32 +221,51 @@ fn main() {
         return;
     }
 
-    let debug = matches.get_flag("debug");
-
     if let Some(dspec) = matches.get_one::<String>("date") {
         match parse_range(dspec) {
             Ok(offsets) => {
-                let map = load_bedeutungen();
                 let mut t = Table::new();
-                t.add_row(row!["Offset", "Datum", "Summe", "Bedeutung"]);
+
+                let mut header = vec![Cell::new("Offset"), Cell::new("Datum")];
+                for label in &cipher_labels {
+                    header.push(Cell::new(label));
+                }
+                t.add_row(Row::new(header));
 
                 let today = Local::now().date_naive();
 
-                for off in offsets {
-                    let date = today + Duration::days(off as i64);
-
-                    // Debug/Normal trennen
+                for (row_index, off) in offsets.iter().enumerate() {
+                    let date = today + Duration::days(*off as i64);
                     let date_str = date.format("%d%m%Y").to_string();
-                    let num = reduce_number_verbose(&date_str, debug);
 
-                    if !debug {
-                        let text = map.get(&num).and_then(|b| b.text.as_deref()).unwrap_or("–");
-                        t.add_row(row![
-                            format!("{:+}", off),
-                            date.format("%d.%m.%Y"),
-                            num,
-                            text
-                        ]);
+                    if debug {
+                        println!("Datum {:+}: {}", off, date.format("%d.%m.%Y"));
+                    }
+
+                    let mut row_cells = vec![
+                        Cell::new(&format!("{:+}", off)),
+                        Cell::new(&date.format("%d.%m.%Y").to_string()),
+                    ];
+
+                    for (cipher_index, cipher) in selected_ciphers.iter().enumerate() {
+                        let step = Step::new(row_index, cipher_index, "date::reduce");
+                        let result =
+                            KernResult::from_input(&date_str, debug, cipher.as_ref(), step);
+
+                        if debug {
+                            println!("[{}]", result.cipher);
+                            for line in &result.trace {
+                                println!("{line}");
+                            }
+                        } else {
+                            row_cells.push(Cell::new(&result.value().to_string()));
+                        }
+                    }
+
+                    if debug {
+                        println!();
+                    } else {
+                        t.add_row(Row::new(row_cells));
                     }
                 }
 
@@ -210,31 +277,36 @@ fn main() {
         }
     }
 
-    /* ­--length Flag gesetzt? -------------------------------------------- */
-    let show_total = matches.get_flag("total");
-    let show_length = matches.get_flag("length");
-    let debug = matches.get_flag("debug");
+    /* --length Flag gesetzt? -------------------------------------------- */
 
-    /* Standard-Modus: Strings berechnen ---------------------------------- */
-    if let Some(args) = matches.get_many::<String>("ARGS") {
+    if let Some(args_values) = matches.get_many::<String>("ARGS") {
+        let args: Vec<String> = args_values.map(|s| s.to_string()).collect();
         let mut result_set = ResultSet::new(); // linear flow collects all calculation results
 
-        for (pipe_index, arg) in args.enumerate() {
-            let step = Step::new(pipe_index, 0, "reduce");
-            let calc_result = KernResult::from_input_default(arg, debug, step);
+        for (pipe_index, arg) in args.iter().enumerate() {
+            for (cipher_index, cipher) in selected_ciphers.iter().enumerate() {
+                let step = Step::new(pipe_index, cipher_index, "reduce");
+                let calc_result = KernResult::from_input(arg, debug, cipher.as_ref(), step);
 
-            if debug {
-                for line in &calc_result.trace {
-                    println!("{line}");
+                if debug {
+                    println!("{} [{}]", arg, calc_result.cipher);
+                    for line in &calc_result.trace {
+                        println!("{line}");
+                    }
+                    println!();
+                } else if show_length {
+                    let len = arg.chars().count();
+                    println!(
+                        "{arg} [{}]: {} ({len})",
+                        calc_result.cipher,
+                        calc_result.value()
+                    );
+                } else {
+                    println!("{arg} [{}]: {}", calc_result.cipher, calc_result.value());
                 }
-            } else if show_length {
-                let len = arg.chars().count();
-                println!("{arg}: {} ({len})", calc_result.value());
-            } else {
-                println!("{arg}: {}", calc_result.value());
-            }
 
-            result_set.add(calc_result);
+                result_set.add(calc_result);
+            }
         }
 
         if show_total {
@@ -244,7 +316,8 @@ fn main() {
                 println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
             }
 
-            let total_step = Step::new(result_set.len(), 0, "aggregate::total");
+            let total_step =
+                Step::new(result_set.len(), selected_ciphers.len(), "aggregate::total");
             let total_result = KernResult::from_numeric_value_default(sum, debug, total_step);
 
             if debug {

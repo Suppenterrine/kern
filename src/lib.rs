@@ -16,28 +16,18 @@ pub mod core {
         pub schatten: Option<String>,
     }
 
-    pub trait Cipher {
-        fn name(&self) -> &str;
-        fn char_to_value(&self, ch: char) -> u32;
-    }
+    #[path = "../core/utils.rs"]
+    pub mod utils;
 
-    #[derive(Debug, Clone)]
-    pub struct OrdinalCipher;
+    #[path = "../core/ciphers/mod.rs"]
+    pub mod ciphers;
 
-    impl Cipher for OrdinalCipher {
-        fn name(&self) -> &str {
-            "ordinal"
-        }
+    pub use ciphers::{
+        Cipher, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher, ReversePythagoreanCipher,
+        available_cipher_names, default_cipher, get_cipher,
+    };
 
-        fn char_to_value(&self, ch: char) -> u32 {
-            match ch {
-                '0'..='9' => ch as u32 - '0' as u32,
-                'A'..='Z' => ch as u32 - 'A' as u32 + 1,
-                'a'..='z' => ch as u32 - 'a' as u32 + 1,
-                _ => 0,
-            }
-        }
-    }
+    use utils::char_to_value_ordinal;
 
     #[derive(Debug, Clone, Serialize)]
     pub struct Step {
@@ -163,7 +153,7 @@ pub mod core {
     }
 
     pub fn char_to_value(ch: char) -> u32 {
-        OrdinalCipher.char_to_value(ch)
+        char_to_value_ordinal(ch)
     }
 
     pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
