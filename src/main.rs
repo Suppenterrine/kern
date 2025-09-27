@@ -1,6 +1,5 @@
-use chrono::{Duration, Local, Utc};
-use clap::{Arg, ArgAction, Command, value_parser};
-use kern::core::sky;
+use chrono::{Duration, Local};
+use clap::{Arg, ArgAction, Command};
 use kern::core::{
     Cipher, KernResult, ResultSet, Step, default_cipher, descriptors, get_cipher, load_bedeutungen,
     parse_range,
@@ -98,25 +97,6 @@ fn main() {
                 .num_args(1..)
                 .help("Input strings to be reduced"),
         )
-        .subcommand(
-            Command::new("sky")
-                .about("Fetches sky data for given location and time")
-                .arg(
-                    Arg::new("lat")
-                        .long("lat")
-                        .required(true)
-                        .value_parser(value_parser!(f64)),
-                )
-                .arg(
-                    Arg::new("lon")
-                        .long("lon")
-                        .required(true)
-                        .value_parser(value_parser!(f64)),
-                )
-                .arg(
-                    Arg::new("time").long("time").value_name("ISO8601"), // optional, z.B. 2025-08-12T07:30:00+00:00
-                ),
-        )
         .get_matches();
 
     let debug = matches.get_flag("debug");
@@ -181,28 +161,6 @@ fn main() {
         .iter()
         .map(|cipher| cipher.name().to_string())
         .collect();
-
-    if let Some((cmd, sub_m)) = matches.subcommand() {
-        match cmd {
-            "sky" => {
-                let lat = *sub_m.get_one::<f64>("lat").unwrap();
-                let lon = *sub_m.get_one::<f64>("lon").unwrap();
-                let dt = if let Some(t) = sub_m.get_one::<String>("time") {
-                    chrono::DateTime::parse_from_rfc3339(t)
-                        .map(|d| d.with_timezone(&Utc))
-                        .unwrap()
-                } else {
-                    Utc::now()
-                };
-                match sky::report(lat, lon, Some(dt)) {
-                    Ok(r) => println!("{}", serde_json::to_string_pretty(&r).unwrap()),
-                    Err(e) => eprintln!("Fehler: {e}"),
-                }
-                return;
-            }
-            _ => {}
-        }
-    }
 
     if let Some(dspec) = matches.get_one::<String>("date") {
         match parse_range(dspec) {
