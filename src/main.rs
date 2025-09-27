@@ -2,8 +2,8 @@ use chrono::{Duration, Local, Utc};
 use clap::{Arg, ArgAction, Command, value_parser};
 use kern::core::sky;
 use kern::core::{
-    Cipher, KernResult, ResultSet, Step, available_cipher_names, default_cipher, get_cipher,
-    load_bedeutungen, lookup, parse_range,
+    Cipher, KernResult, ResultSet, Step, default_cipher, descriptors, get_cipher, load_bedeutungen,
+    parse_range,
 };
 use prettytable::{Cell, Row, Table};
 use serde_json;
@@ -30,10 +30,14 @@ fn main() {
             Arg::new("lookup")
                 .short('l')
                 .long("lookup")
-                .value_name("ZAHL")
-                .num_args(1..)
-                .value_delimiter(',')
-                .help("Bedeutung einer Zahl anzeigen"),
+                .action(ArgAction::SetTrue)
+                .help("Prints lookup meanings for all reduced results"),
+        )
+        .arg(
+            Arg::new("list-ciphers")
+                .long("list-ciphers")
+                .action(ArgAction::SetTrue)
+                .help("Lists all available ciphers and exits"),
         )
         .arg(
             Arg::new("cipher")
@@ -42,26 +46,26 @@ fn main() {
                 .value_name("CIPHER")
                 .action(ArgAction::Append)
                 .value_delimiter(',')
-                .help("Cipher(s) to use (repeatable). Optionen: ordinal, reverse_ordinal, pythagorean, reverse_pythagorean (or 'all')"),
+                .help("Cipher(s) to use (repeatable). Use cipher name, shortcode or 'all'"),
         )
         .arg(
-            Arg::new("licht")
-                .long("licht")
+            Arg::new("light")
+                .long("light")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt auch die Lichtseite in der Lookup-Tabelle"),
+                .help("Shows the light meaning column in lookup output"),
         )
         .arg(
-            Arg::new("schatten")
-                .long("schatten")
+            Arg::new("shadow")
+                .long("shadow")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt auch die Schattenseite in der Lookup-Tabelle"),
+                .help("Shows the shadow meaning column in lookup output"),
         )
         .arg(
             Arg::new("length")
                 .short('L')
                 .long("length")
                 .action(ArgAction::SetTrue)
-                .help("Hängt die Zeichenlänge an die Ergebnis-Ausgabe an"),
+                .help("Appends the character length to the result output"),
         )
         .arg(
             Arg::new("date")
@@ -70,7 +74,7 @@ fn main() {
                 .value_name("RANGE")
                 .allow_hyphen_values(true)
                 .help(
-                    r#"Datums-Offset/Range:
+                    r#"Date-Offset/Range:
     -3, +2, 0+3, 0-3, -5..4, 3..-2, etc.
     28.07.2025, 26.07.2025..02.08.2025"#,
                 ),
@@ -80,23 +84,23 @@ fn main() {
                 .short('v')
                 .long("verbose")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt die vollständige Reduktionskette für jede Eingabe"),
+                .help("Show detailed calculation trace"),
         )
         .arg(
             Arg::new("total")
                 .short('t')
                 .long("total")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt die Gesamtsumme aller Ergebnisse (reduziert)"),
+                .help("Shows the total sum of all reduced results at the end"),
         )
         .arg(
             Arg::new("ARGS")
                 .num_args(1..)
-                .help("Strings oder Zahlen zur Quersummen-Berechnung"),
+                .help("Input strings to be reduced"),
         )
         .subcommand(
             Command::new("sky")
-                .about("Wetter + Sonnenstand kombiniert")
+                .about("Fetches sky data for given location and time")
                 .arg(
                     Arg::new("lat")
                         .long("lat")
@@ -118,26 +122,52 @@ fn main() {
     let debug = matches.get_flag("debug");
     let show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
+    let show_lookup = matches.get_flag("lookup");
+    let show_light = matches.get_flag("light");
+    let show_shadow = matches.get_flag("shadow");
+
+    if matches.get_flag("list-ciphers") {
+        let mut table = Table::new();
+        table.add_row(Row::new(vec![
+            Cell::new("Name"),
+            Cell::new("Short"),
+            Cell::new("Description"),
+        ]));
+
+        for descriptor in descriptors() {
+            table.add_row(Row::new(vec![
+                Cell::new(descriptor.name),
+                Cell::new(descriptor.short),
+                Cell::new(descriptor.description),
+            ]));
+        }
+
+        table.printstd();
+        return;
+    }
 
     let mut selected_ciphers: Vec<Box<dyn Cipher>> = Vec::new();
     if let Some(values) = matches.get_many::<String>("cipher") {
-        // collect values because the iterator can only be consumed once
         let values_vec: Vec<String> = values.map(|s| s.to_string()).collect();
 
-        // if the user requested "all" (case-insensitive), expand to all available ciphers
         if values_vec.iter().any(|v| v.eq_ignore_ascii_case("all")) {
-            for name in available_cipher_names() {
-                if let Some(cipher) = get_cipher(&name) {
-                    selected_ciphers.push(cipher);
-                }
+            for descriptor in descriptors() {
+                selected_ciphers.push((descriptor.factory)());
             }
         } else {
             for value in values_vec {
                 match get_cipher(&value) {
                     Some(cipher) => selected_ciphers.push(cipher),
                     None => {
-                        let available = available_cipher_names().join(", ");
-                        eprintln!("Unbekannter Cipher: {value}. Verfügbar: {available}");
+                        let available: Vec<String> = descriptors()
+                            .iter()
+                            .map(|d| format!("{} ({})", d.name, d.short))
+                            .collect();
+                        eprintln!(
+                            "Unknown cipher: {}. Available: {}",
+                            value,
+                            available.join(", "),
+                        );
                     }
                 }
             }
@@ -147,7 +177,6 @@ fn main() {
     if selected_ciphers.is_empty() {
         selected_ciphers.push(default_cipher());
     }
-
     let cipher_labels: Vec<String> = selected_ciphers
         .iter()
         .map(|cipher| cipher.name().to_string())
@@ -173,52 +202,6 @@ fn main() {
             }
             _ => {}
         }
-    }
-
-    /* --lookup: sofort Tabelle ausgeben ---------------------------------- */
-    if let Some(list) = matches.get_many::<String>("lookup") {
-        let map = load_bedeutungen();
-        let mut t = Table::new();
-        let show_licht = matches.get_flag("licht");
-        let show_schatten = matches.get_flag("schatten");
-
-        let mut header = vec![Cell::new("Zahl"), Cell::new("Bedeutung")];
-        if show_licht {
-            header.push(Cell::new("Lichtseite"));
-        }
-        if show_schatten {
-            header.push(Cell::new("Schattenseite"));
-        }
-        t.add_row(Row::new(header));
-
-        for raw in list {
-            for part in raw.split(',') {
-                let s = part.trim();
-                if s.is_empty() {
-                    continue;
-                }
-
-                match s.parse::<u32>() {
-                    Ok(n) => {
-                        let text = lookup(n, &map);
-                        let entry = map.get(&n);
-                        let mut cells = vec![Cell::new(&n.to_string()), Cell::new(text)];
-                        if show_licht {
-                            let l = entry.and_then(|b| b.licht.as_deref()).unwrap_or("-");
-                            cells.push(Cell::new(l));
-                        }
-                        if show_schatten {
-                            let s = entry.and_then(|b| b.schatten.as_deref()).unwrap_or("-");
-                            cells.push(Cell::new(s));
-                        }
-                        t.add_row(Row::new(cells));
-                    }
-                    Err(_) => eprintln!("Ignoriere ungültigen Wert: {s}"),
-                }
-            }
-        }
-        t.printstd();
-        return;
     }
 
     if let Some(dspec) = matches.get_one::<String>("date") {
@@ -330,6 +313,79 @@ fn main() {
             }
 
             result_set.add(total_result);
+        }
+
+        if show_lookup {
+            use std::collections::{BTreeSet, HashMap};
+
+            let mut grouped_order: Vec<u32> = Vec::new();
+            let mut grouped_map: HashMap<u32, Vec<&KernResult>> = HashMap::new();
+
+            for result in result_set.iter() {
+                let value = result.value();
+                if let Some(entries) = grouped_map.get_mut(&value) {
+                    entries.push(result);
+                } else {
+                    grouped_order.push(value);
+                    grouped_map.insert(value, vec![result]);
+                }
+            }
+
+            if grouped_order.is_empty() {
+                println!("Keine reduzierten Ergebnisse für Lookup.");
+            } else {
+                let bedeutungen = load_bedeutungen();
+                let mut table = Table::new();
+                let mut header = vec![
+                    Cell::new("Quellen"),
+                    Cell::new("Zahl"),
+                    Cell::new("Bedeutung"),
+                ];
+                if show_light {
+                    header.push(Cell::new("Light"));
+                }
+                if show_shadow {
+                    header.push(Cell::new("Shadow"));
+                }
+                table.add_row(Row::new(header));
+
+                for value in &grouped_order {
+                    if let Some(results) = grouped_map.get(value) {
+                        let entry = bedeutungen.get(value);
+
+                        let mut sources = BTreeSet::new();
+                        for res in results {
+                            sources.insert(format!("{} [{}]", res.source, res.cipher));
+                        }
+
+                        let mut cells = vec![
+                            Cell::new(&sources.into_iter().collect::<Vec<_>>().join(", ")),
+                            Cell::new(&value.to_string()),
+                            Cell::new(entry.and_then(|b| b.text.as_deref()).unwrap_or("-")),
+                        ];
+
+                        if show_light {
+                            cells.push(Cell::new(
+                                entry.and_then(|b| b.licht.as_deref()).unwrap_or("-"),
+                            ));
+                        }
+                        if show_shadow {
+                            cells.push(Cell::new(
+                                entry.and_then(|b| b.schatten.as_deref()).unwrap_or("-"),
+                            ));
+                        }
+
+                        table.add_row(Row::new(cells));
+                    }
+                }
+
+                table.printstd();
+            }
+        }
+        if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
+            if let Ok(debug_json) = serde_json::to_string_pretty(&result_set) {
+                eprintln!("[KERN DEBUG] ResultSet = {debug_json}");
+            }
         }
     } else {
         eprintln!("Keine weiteren Argumente angegeben.");
