@@ -1,10 +1,11 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, KernResult, Operation, Pipeline, Step, default_cipher, descriptors, get_cipher,
-    load_bedeutungen, parse_range,
+    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, default_cipher,
+    descriptors, get_cipher, load_bedeutungen, parse_range,
 };
 use prettytable::{Cell, Row, Table};
+use serde::Deserialize;
 use serde_json;
 
 fn main() {
@@ -178,7 +179,13 @@ fn main() {
                 let mut pipeline = Pipeline::new();
                 pipeline.add_step(Step::new(0, 0, Operation::DateReduce));
 
-                let result_set = pipeline.run(&inputs, &selected_ciphers, debug);
+                let mut ctx = FlowContext::new(FlowFlags {
+                    verbose: debug,
+                    ciphers: cipher_labels.clone(),
+                    total: show_total,
+                });
+
+                let result_set = pipeline.run(&mut ctx, &inputs, &selected_ciphers);
 
                 let mut results_matrix: Vec<Vec<Option<&KernResult>>> =
                     vec![vec![None; selected_ciphers.len()]; offsets.len()];
@@ -257,16 +264,27 @@ fn main() {
         if show_total {
             pipeline.add_step(Step::new(0, 0, Operation::AggregateTotal));
         }
+        if show_lookup {
+            pipeline.add_step(Step::new(0, 0, Operation::Lookup));
+        }
 
-        let result_set = pipeline.run(&args, &selected_ciphers, debug);
+        let mut ctx = FlowContext::new(FlowFlags {
+            verbose: debug,
+            ciphers: cipher_labels.clone(),
+            total: show_total,
+        });
+
+        let result_set = pipeline.run(&mut ctx, &args, &selected_ciphers);
 
         let mut base_results: Vec<&KernResult> = Vec::new();
         let mut aggregate_results: Vec<&KernResult> = Vec::new();
+        let mut lookup_results: Vec<&KernResult> = Vec::new();
 
         for result in result_set.iter() {
             match &result.step.operation {
                 Operation::Reduce => base_results.push(result),
                 Operation::AggregateTotal => aggregate_results.push(result),
+                Operation::Lookup => lookup_results.push(result),
                 _ => {}
             }
         }
@@ -296,11 +314,22 @@ fn main() {
         }
 
         if show_total && !aggregate_results.is_empty() {
-            let sum: u32 = base_results.iter().map(|r| r.value()).sum();
+            let relevant: Vec<&KernResult> = ctx
+                .memory
+                .iter()
+                .filter(|res| {
+                    matches!(
+                        res.step.operation,
+                        Operation::Reduce | Operation::DateReduce | Operation::Custom(_)
+                    )
+                })
+                .collect();
 
-            if debug && !base_results.is_empty() {
+            let sum: u32 = relevant.iter().map(|res| res.value()).sum();
+
+            if debug && !relevant.is_empty() {
                 let parts: Vec<String> =
-                    base_results.iter().map(|r| r.value().to_string()).collect();
+                    relevant.iter().map(|res| res.value().to_string()).collect();
                 println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
             }
 
@@ -317,70 +346,71 @@ fn main() {
         }
 
         if show_lookup {
-            use std::collections::{BTreeSet, HashMap};
-
-            let mut grouped_order: Vec<u32> = Vec::new();
-            let mut grouped_map: HashMap<u32, Vec<&KernResult>> = HashMap::new();
-
-            for result in result_set.iter() {
-                let value = result.value();
-                if let Some(entries) = grouped_map.get_mut(&value) {
-                    entries.push(result);
-                } else {
-                    grouped_order.push(value);
-                    grouped_map.insert(value, vec![result]);
-                }
+            #[derive(Deserialize)]
+            struct LookupEntry {
+                value: u32,
+                sources: Vec<String>,
             }
 
-            if grouped_order.is_empty() {
-                println!("Keine reduzierten Ergebnisse für Lookup.");
-            } else {
-                let bedeutungen = load_bedeutungen();
-                let mut table = Table::new();
-                let mut header = vec![
-                    Cell::new("Quellen"),
-                    Cell::new("Zahl"),
-                    Cell::new("Bedeutung"),
-                ];
-                if show_light {
-                    header.push(Cell::new("Light"));
-                }
-                if show_shadow {
-                    header.push(Cell::new("Shadow"));
-                }
-                table.add_row(Row::new(header));
+            let payload = lookup_results.last().and_then(|res| res.trace.first());
 
-                for value in &grouped_order {
-                    if let Some(results) = grouped_map.get(value) {
-                        let entry = bedeutungen.get(value);
-
-                        let mut sources = BTreeSet::new();
-                        for res in results {
-                            sources.insert(format!("{} [{}]", res.source, res.cipher));
-                        }
-
-                        let mut cells = vec![
-                            Cell::new(&sources.into_iter().collect::<Vec<_>>().join(", ")),
-                            Cell::new(&value.to_string()),
-                            Cell::new(entry.and_then(|b| b.text.as_deref()).unwrap_or("-")),
+            match payload {
+                Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
+                    Ok(entries) if !entries.is_empty() => {
+                        let bedeutungen = load_bedeutungen();
+                        let mut table = Table::new();
+                        let mut header = vec![
+                            Cell::new("Quellen"),
+                            Cell::new("Zahl"),
+                            Cell::new("Bedeutung"),
                         ];
-
                         if show_light {
-                            cells.push(Cell::new(
-                                entry.and_then(|b| b.licht.as_deref()).unwrap_or("-"),
-                            ));
+                            header.push(Cell::new("Light"));
                         }
                         if show_shadow {
-                            cells.push(Cell::new(
-                                entry.and_then(|b| b.schatten.as_deref()).unwrap_or("-"),
-                            ));
+                            header.push(Cell::new("Shadow"));
+                        }
+                        table.add_row(Row::new(header));
+
+                        for entry in entries {
+                            let sources = entry.sources.join(", ");
+                            let value_str = entry.value.to_string();
+                            let bedeutung_entry = bedeutungen.get(&entry.value);
+
+                            let mut cells = vec![
+                                Cell::new(&sources),
+                                Cell::new(&value_str),
+                                Cell::new(
+                                    bedeutung_entry
+                                        .and_then(|b| b.text.as_deref())
+                                        .unwrap_or("-"),
+                                ),
+                            ];
+
+                            if show_light {
+                                cells.push(Cell::new(
+                                    bedeutung_entry
+                                        .and_then(|b| b.licht.as_deref())
+                                        .unwrap_or("-"),
+                                ));
+                            }
+                            if show_shadow {
+                                cells.push(Cell::new(
+                                    bedeutung_entry
+                                        .and_then(|b| b.schatten.as_deref())
+                                        .unwrap_or("-"),
+                                ));
+                            }
+
+                            table.add_row(Row::new(cells));
                         }
 
-                        table.add_row(Row::new(cells));
+                        table.printstd();
                     }
-                }
-
-                table.printstd();
+                    Ok(_) => println!("Keine reduzierten Ergebnisse für Lookup."),
+                    Err(_) => println!("Lookup-Auswertung konnte nicht gelesen werden."),
+                },
+                None => println!("Keine reduzierten Ergebnisse für Lookup."),
             }
         }
         if std::env::var("KERN_DUMP_RESULTSET").is_ok() {

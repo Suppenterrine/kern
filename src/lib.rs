@@ -26,7 +26,7 @@ pub mod core {
     #[path = "../core/flow.rs"]
     pub mod flow;
 
-    pub use flow::Pipeline;
+    pub use flow::{FlowContext, FlowFlags, Pipeline};
 
     pub use ciphers::{
         Cipher, CipherDescriptor, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher,
