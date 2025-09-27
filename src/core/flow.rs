@@ -42,6 +42,10 @@ impl Pipeline {
         self.steps.push(step);
     }
 
+    pub fn steps(&self) -> &[Step] {
+        &self.steps
+    }
+
     pub fn run(
         &self,
         ctx: &mut FlowContext,
@@ -49,19 +53,23 @@ impl Pipeline {
         ciphers: &[Box<dyn Cipher>],
     ) -> ResultSet {
         let mut result_set = ResultSet::new();
-        let verbose = ctx.global_flags.verbose;
 
         for step in &self.steps {
+            let effective_verbose = step.local_flags.verbose.unwrap_or(ctx.global_flags.verbose);
+
             match &step.operation {
                 Operation::Reduce | Operation::DateReduce => {
-                    for (pipe_index, input) in inputs.iter().enumerate() {
-                        for (cipher_index, cipher) in ciphers.iter().enumerate() {
+                    if let Some(input) = inputs.get(step.pipe_index) {
+                        for (cipher_index, cipher) in self.select_ciphers(step, ciphers) {
                             let mut ctx_step = step.clone();
-                            ctx_step.pipe_index = pipe_index;
                             ctx_step.cipher_index = cipher_index;
 
-                            let result =
-                                KernResult::from_input(input, verbose, cipher.as_ref(), ctx_step);
+                            let result = KernResult::from_input(
+                                input,
+                                effective_verbose,
+                                cipher.as_ref(),
+                                ctx_step,
+                            );
                             ctx.record(result.clone());
                             result_set.add(result);
                         }
@@ -81,10 +89,10 @@ impl Pipeline {
                         .sum();
 
                     let mut ctx_step = step.clone();
-                    ctx_step.pipe_index = ctx.memory.len();
                     ctx_step.cipher_index = ciphers.len();
 
-                    let result = KernResult::from_numeric_value_default(total, verbose, ctx_step);
+                    let result =
+                        KernResult::from_numeric_value_default(total, effective_verbose, ctx_step);
                     ctx.record(result.clone());
                     result_set.add(result);
                 }
@@ -131,12 +139,25 @@ impl Pipeline {
                     let payload =
                         serde_json::to_string(&entries).unwrap_or_else(|_| String::from("[]"));
 
-                    let mut ctx_step = step.clone();
-                    ctx_step.pipe_index = ctx.memory.len();
-                    ctx_step.cipher_index = 0;
+                    let mut trace = Vec::new();
+                    if effective_verbose {
+                        trace.push(format!("Lookup entries: {}", entries.len()));
+                        for entry in &entries {
+                            trace.push(format!("{} -> {}", entry.value, entry.sources.join(", ")));
+                        }
+                    }
 
-                    let result =
-                        KernResult::new("lookup", "lookup", ctx_step, 0, verbose, vec![payload]);
+                    let ctx_step = step.clone();
+
+                    let result = KernResult::new(
+                        "lookup",
+                        "lookup",
+                        ctx_step,
+                        0,
+                        effective_verbose,
+                        trace,
+                        Some(payload),
+                    );
 
                     ctx.record(result.clone());
                     result_set.add(result);
@@ -148,5 +169,39 @@ impl Pipeline {
         }
 
         result_set
+    }
+
+    fn select_ciphers<'a>(
+        &self,
+        step: &Step,
+        ciphers: &'a [Box<dyn Cipher>],
+    ) -> Vec<(usize, &'a Box<dyn Cipher>)> {
+        if let Some(names) = &step.local_flags.ciphers {
+            let mut selected = Vec::new();
+            for (idx, cipher) in ciphers.iter().enumerate() {
+                if names
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(cipher.name()))
+                {
+                    selected.push((idx, cipher));
+                }
+            }
+
+            if selected.is_empty() {
+                ciphers
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, cipher)| (idx, cipher))
+                    .collect()
+            } else {
+                selected
+            }
+        } else {
+            ciphers
+                .iter()
+                .enumerate()
+                .map(|(idx, cipher)| (idx, cipher))
+                .collect()
+        }
     }
 }

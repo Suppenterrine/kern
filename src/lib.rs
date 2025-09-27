@@ -57,11 +57,18 @@ pub mod core {
         }
     }
 
+    #[derive(Debug, Clone, Default, Serialize)]
+    pub struct StepFlags {
+        pub verbose: Option<bool>,
+        pub ciphers: Option<Vec<String>>,
+    }
+
     #[derive(Debug, Clone, Serialize)]
     pub struct Step {
         pub pipe_index: usize,
         pub cipher_index: usize,
         pub operation: Operation,
+        pub local_flags: StepFlags,
     }
 
     impl Step {
@@ -70,7 +77,13 @@ pub mod core {
                 pipe_index,
                 cipher_index,
                 operation,
+                local_flags: StepFlags::default(),
             }
+        }
+
+        pub fn with_flags(mut self, flags: StepFlags) -> Self {
+            self.local_flags = flags;
+            self
         }
     }
 
@@ -82,6 +95,8 @@ pub mod core {
         pub value: u32,
         pub verbose: bool,
         pub trace: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub payload: Option<String>,
     }
 
     impl KernResult {
@@ -92,6 +107,7 @@ pub mod core {
             value: u32,
             verbose: bool,
             trace: Vec<String>,
+            payload: Option<String>,
         ) -> Self {
             Self {
                 source: source.into(),
@@ -100,12 +116,13 @@ pub mod core {
                 value,
                 verbose,
                 trace,
+                payload,
             }
         }
 
         pub fn from_input(input: &str, verbose: bool, cipher: &dyn Cipher, step: Step) -> Self {
             let (value, trace) = reduce_number_steps_with_cipher(input, cipher);
-            Self::new(input, cipher.name(), step, value, verbose, trace)
+            Self::new(input, cipher.name(), step, value, verbose, trace, None)
         }
 
         pub fn from_input_default(input: &str, verbose: bool, step: Step) -> Self {
@@ -121,7 +138,7 @@ pub mod core {
         ) -> Self {
             let input = sum.to_string();
             let (value, trace) = reduce_number_steps_with_cipher(&input, cipher);
-            Self::new(input, cipher.name(), step, value, verbose, trace)
+            Self::new(input, cipher.name(), step, value, verbose, trace, None)
         }
 
         pub fn from_numeric_value_default(sum: u32, verbose: bool, step: Step) -> Self {

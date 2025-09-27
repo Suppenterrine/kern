@@ -1,12 +1,13 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, default_cipher,
-    descriptors, get_cipher, load_bedeutungen, parse_range,
+    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepFlags,
+    default_cipher, descriptors, get_cipher, load_bedeutungen, parse_range,
 };
 use prettytable::{Cell, Row, Table};
 use serde::Deserialize;
 use serde_json;
+use std::collections::{HashMap, HashSet};
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION");
@@ -47,7 +48,6 @@ fn main() {
         )
         .arg(
             Arg::new("cipher")
-                .short('c')
                 .long("cipher")
                 .value_name("CIPHER")
                 .action(ArgAction::Append)
@@ -88,7 +88,6 @@ fn main() {
         )
         .arg(
             Arg::new("debug")
-                .short('v')
                 .long("verbose")
                 .action(ArgAction::SetTrue)
                 .help("Show detailed calculation trace"),
@@ -96,14 +95,15 @@ fn main() {
         .arg(
             Arg::new("ARGS")
                 .num_args(1..)
+                .allow_hyphen_values(true)
                 .help("Input strings to be reduced"),
         )
         .get_matches();
 
     let debug = matches.get_flag("debug");
-    let show_total = matches.get_flag("total");
+    let mut show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
-    let show_lookup = matches.get_flag("lookup");
+    let mut show_lookup = matches.get_flag("lookup");
     let show_light = matches.get_flag("light");
     let show_shadow = matches.get_flag("shadow");
 
@@ -158,10 +158,11 @@ fn main() {
     if selected_ciphers.is_empty() {
         selected_ciphers.push(default_cipher());
     }
-    let cipher_labels: Vec<String> = selected_ciphers
+    let mut cipher_labels: Vec<String> = selected_ciphers
         .iter()
         .map(|cipher| cipher.name().to_string())
         .collect();
+    let cipher_alias_map = build_cipher_alias_map(&cipher_labels);
 
     if let Some(dspec) = matches.get_one::<String>("date") {
         match parse_range(dspec) {
@@ -177,7 +178,9 @@ fn main() {
                     .collect();
 
                 let mut pipeline = Pipeline::new();
-                pipeline.add_step(Step::new(0, 0, Operation::DateReduce));
+                for idx in 0..inputs.len() {
+                    pipeline.add_step(Step::new(idx, 0, Operation::DateReduce));
+                }
 
                 let mut ctx = FlowContext::new(FlowFlags {
                     verbose: debug,
@@ -188,21 +191,19 @@ fn main() {
                 let result_set = pipeline.run(&mut ctx, &inputs, &selected_ciphers);
 
                 let mut results_matrix: Vec<Vec<Option<&KernResult>>> =
-                    vec![vec![None; selected_ciphers.len()]; offsets.len()];
+                    vec![vec![None; selected_ciphers.len()]; inputs.len()];
 
                 for result in result_set.iter() {
                     if matches!(result.step.operation, Operation::DateReduce) {
-                        let row = result.step.pipe_index;
-                        let col = result.step.cipher_index;
-                        if row < results_matrix.len() {
-                            if let Some(slot) = results_matrix[row].get_mut(col) {
+                        if let Some(row) = results_matrix.get_mut(result.step.pipe_index) {
+                            if let Some(slot) = row.get_mut(result.step.cipher_index) {
                                 *slot = Some(result);
                             }
                         }
                     }
                 }
 
-                if debug {
+                if ctx.global_flags.verbose {
                     for (row_index, off) in offsets.iter().enumerate() {
                         let display_date = formatted_dates[row_index];
                         println!("Datum {:+}: {}", off, display_date.format("%d.%m.%Y"));
@@ -210,9 +211,11 @@ fn main() {
                         if let Some(row_results) = results_matrix.get(row_index) {
                             for maybe_result in row_results {
                                 if let Some(result) = maybe_result {
-                                    println!("[{}]", result.cipher);
-                                    for line in &result.trace {
-                                        println!("{line}");
+                                    if result.verbose {
+                                        println!("[{}]", result.cipher);
+                                        for line in &result.trace {
+                                            println!("{line}");
+                                        }
                                     }
                                 }
                             }
@@ -257,15 +260,42 @@ fn main() {
     /* --length Flag gesetzt? -------------------------------------------- */
 
     if let Some(args_values) = matches.get_many::<String>("ARGS") {
-        let args: Vec<String> = args_values.map(|s| s.to_string()).collect();
+        let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
+
+        let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map) {
+            Ok(data) => data,
+            Err(err) => {
+                eprintln!("{err}");
+                return;
+            }
+        };
+
+        if parsed.inputs.is_empty() {
+            eprintln!("Keine weiteren Argumente angegeben.");
+            return;
+        }
+
+        show_total = show_total || parsed.saw_total;
+        show_lookup = show_lookup || parsed.saw_lookup;
+
+        let args = parsed.inputs;
+        let reduce_steps = parsed.steps;
+
+        ensure_local_ciphers(&mut selected_ciphers, &mut cipher_labels, &reduce_steps);
 
         let mut pipeline = Pipeline::new();
-        pipeline.add_step(Step::new(0, 0, Operation::Reduce));
-        if show_total {
-            pipeline.add_step(Step::new(0, 0, Operation::AggregateTotal));
+        for step in reduce_steps.into_iter() {
+            pipeline.add_step(step);
         }
+
+        if show_total {
+            let pipe_index = args.len().saturating_sub(1);
+            pipeline.add_step(Step::new(pipe_index, 0, Operation::AggregateTotal));
+        }
+
         if show_lookup {
-            pipeline.add_step(Step::new(0, 0, Operation::Lookup));
+            let pipe_index = args.len().saturating_sub(1);
+            pipeline.add_step(Step::new(pipe_index, 0, Operation::Lookup));
         }
 
         let mut ctx = FlowContext::new(FlowFlags {
@@ -276,16 +306,18 @@ fn main() {
 
         let result_set = pipeline.run(&mut ctx, &args, &selected_ciphers);
 
-        let mut base_results: Vec<&KernResult> = Vec::new();
+        let mut base_results: HashMap<(usize, usize), &KernResult> = HashMap::new();
         let mut aggregate_results: Vec<&KernResult> = Vec::new();
         let mut lookup_results: Vec<&KernResult> = Vec::new();
 
         for result in result_set.iter() {
             match &result.step.operation {
-                Operation::Reduce => base_results.push(result),
+                Operation::Reduce | Operation::DateReduce => {
+                    base_results.insert((result.step.pipe_index, result.step.cipher_index), result);
+                }
                 Operation::AggregateTotal => aggregate_results.push(result),
                 Operation::Lookup => lookup_results.push(result),
-                _ => {}
+                Operation::Custom(_) => {}
             }
         }
 
@@ -294,9 +326,9 @@ fn main() {
         if cipher_count > 0 {
             for (pipe_index, arg) in args.iter().enumerate() {
                 for cipher_index in 0..cipher_count {
-                    let base_idx = pipe_index * cipher_count + cipher_index;
-                    if let Some(result) = base_results.get(base_idx) {
-                        if debug {
+                    if let Some(result) = base_results.get(&(pipe_index, cipher_index)) {
+                        let result = *result;
+                        if result.verbose {
                             println!("{} [{}]", arg, result.cipher);
                             for line in &result.trace {
                                 println!("{line}");
@@ -326,15 +358,20 @@ fn main() {
                 .collect();
 
             let sum: u32 = relevant.iter().map(|res| res.value()).sum();
-
-            if debug && !relevant.is_empty() {
-                let parts: Vec<String> =
-                    relevant.iter().map(|res| res.value().to_string()).collect();
-                println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
-            }
+            let totals_verbose = aggregate_results.iter().any(|res| res.verbose);
+            let parts: Vec<String> = if totals_verbose {
+                relevant.iter().map(|res| res.value().to_string()).collect()
+            } else {
+                Vec::new()
+            };
+            let mut printed_parts = false;
 
             for total_result in aggregate_results {
-                if debug {
+                if total_result.verbose {
+                    if !printed_parts && !parts.is_empty() {
+                        println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
+                        printed_parts = true;
+                    }
                     for line in &total_result.trace {
                         println!("{line}");
                     }
@@ -352,7 +389,7 @@ fn main() {
                 sources: Vec<String>,
             }
 
-            let payload = lookup_results.last().and_then(|res| res.trace.first());
+            let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
 
             match payload {
                 Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
@@ -421,4 +458,147 @@ fn main() {
     } else {
         eprintln!("Keine weiteren Argumente angegeben.");
     }
+}
+fn build_cipher_alias_map(cipher_labels: &[String]) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+
+    for descriptor in descriptors() {
+        map.insert(descriptor.name.to_lowercase(), descriptor.name.to_string());
+        map.insert(descriptor.short.to_lowercase(), descriptor.name.to_string());
+    }
+
+    for label in cipher_labels {
+        map.entry(label.to_lowercase())
+            .or_insert_with(|| label.clone());
+    }
+
+    map
+}
+
+fn ensure_local_ciphers(
+    selected_ciphers: &mut Vec<Box<dyn Cipher>>,
+    cipher_labels: &mut Vec<String>,
+    steps: &[Step],
+) {
+    let mut existing: HashSet<String> = selected_ciphers
+        .iter()
+        .map(|cipher| cipher.name().to_lowercase())
+        .collect();
+
+    for step in steps {
+        if let Some(names) = &step.local_flags.ciphers {
+            for name in names {
+                let key = name.to_lowercase();
+                if existing.contains(&key) {
+                    continue;
+                }
+
+                if let Some(cipher) = get_cipher(&key) {
+                    let canonical = cipher.name().to_string();
+                    existing.insert(canonical.to_lowercase());
+                    cipher_labels.push(canonical.clone());
+                    selected_ciphers.push(cipher);
+                }
+            }
+        }
+    }
+}
+
+struct ParsedPipeline {
+    inputs: Vec<String>,
+    steps: Vec<Step>,
+    saw_total: bool,
+    saw_lookup: bool,
+}
+
+fn parse_pipeline_tokens(
+    tokens: &[String],
+    cipher_aliases: &HashMap<String, String>,
+) -> Result<ParsedPipeline, String> {
+    let mut inputs = Vec::new();
+    let mut steps = Vec::new();
+    let mut current_input: Option<String> = None;
+    let mut current_flags = StepFlags::default();
+    let mut iter = tokens.iter();
+    let mut saw_total = false;
+    let mut saw_lookup = false;
+
+    while let Some(token) = iter.next() {
+        match token.as_str() {
+            "-v" => {
+                if current_input.is_none() {
+                    return Err(String::from(
+                        "Lokales Flag -v muss nach einem Input angegeben werden.",
+                    ));
+                }
+                current_flags.verbose = Some(true);
+            }
+            "-c" => {
+                if current_input.is_none() {
+                    return Err(String::from(
+                        "Lokales Flag -c muss nach einem Input angegeben werden.",
+                    ));
+                }
+                let names_token = iter.next().ok_or_else(|| {
+                    String::from("Nach -c wird eine kommagetrennte Cipher-Liste erwartet.")
+                })?;
+                let mut resolved = Vec::new();
+                for raw in names_token.split(',') {
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let key = trimmed.to_lowercase();
+                    if let Some(canonical) = cipher_aliases.get(&key) {
+                        if !resolved
+                            .iter()
+                            .any(|existing: &String| existing.eq_ignore_ascii_case(canonical))
+                        {
+                            resolved.push(canonical.clone());
+                        }
+                    } else {
+                        return Err(format!("Unbekanntes Cipher für -c: {trimmed}"));
+                    }
+                }
+                if resolved.is_empty() {
+                    return Err(String::from(
+                        "Nach -c wurde kein gültiges Cipher angegeben.",
+                    ));
+                }
+                current_flags.ciphers = Some(resolved);
+            }
+            "-t" | "--total" => {
+                saw_total = true;
+            }
+            "-l" | "--lookup" => {
+                saw_lookup = true;
+            }
+            _ => {
+                if let Some(input) = current_input.take() {
+                    let pipe_index = inputs.len();
+                    inputs.push(input);
+                    let mut step = Step::new(pipe_index, 0, Operation::Reduce);
+                    step.local_flags = current_flags.clone();
+                    steps.push(step);
+                    current_flags = StepFlags::default();
+                }
+                current_input = Some(token.clone());
+            }
+        }
+    }
+
+    if let Some(input) = current_input.take() {
+        let pipe_index = inputs.len();
+        inputs.push(input);
+        let mut step = Step::new(pipe_index, 0, Operation::Reduce);
+        step.local_flags = current_flags.clone();
+        steps.push(step);
+    }
+
+    Ok(ParsedPipeline {
+        inputs,
+        steps,
+        saw_total,
+        saw_lookup,
+    })
 }
