@@ -50,21 +50,21 @@ pub fn default_cipher() -> Box<dyn Cipher> {
 pub fn get_cipher(name: &str) -> Option<Box<dyn Cipher>> {
     let key = name.to_lowercase();
     match key.as_str() {
-        "ordinal" | "ord" => Some(Box::new(OrdinalCipher)),
-        "reverse_ordinal" | "reverse-ordinal" | "rev_ord" | "rev-ord" => {
+        "ordinal" | "ord" | "or" => Some(Box::new(OrdinalCipher)),
+        "reverse_ordinal" | "rev_ord" | "ro" => {
             Some(Box::new(ReverseOrdinalCipher))
         }
-        "pythagorean" | "pyth" => Some(Box::new(PythagoreanCipher)),
-        "reverse_pythagorean" | "reverse-pythagorean" | "rev_pyth" | "rev-pyth" => {
+        "pythagorean" | "pyth" | "py" => Some(Box::new(PythagoreanCipher)),
+        "reverse_pythagorean" | "rev_pyth" | "rp" => {
             Some(Box::new(ReversePythagoreanCipher))
         }
-        "chaldean" | "chald" => Some(Box::new(ChaldeanCipher)),
-        "agrippa" | "agr" => Some(Box::new(AgrippaCipher)),
-        "primes" | "prime" => Some(Box::new(PrimesCipher)),
-        "fibonacci" | "fib" => Some(Box::new(FibonacciCipher)),
-        "squares" | "square" => Some(Box::new(SquaresCipher)),
-        "cubes" | "cube" => Some(Box::new(CubesCipher)),
-        "septenary" | "sept" => Some(Box::new(SeptenaryCipher)),
+        "chaldean" | "chald" | "ch" => Some(Box::new(ChaldeanCipher)),
+        "agrippa" | "agr" | "ag"  => Some(Box::new(AgrippaCipher)),
+        "primes" | "prime" | "pr" => Some(Box::new(PrimesCipher)),
+        "fibonacci" | "fib" | "fi" => Some(Box::new(FibonacciCipher)),
+        "squares" | "square" | "sq" => Some(Box::new(SquaresCipher)),
+        "cubes" | "cube" | "cu" => Some(Box::new(CubesCipher)),
+        "septenary" | "sept" | "se" => Some(Box::new(SeptenaryCipher)),
         _ => None,
     }
 }
