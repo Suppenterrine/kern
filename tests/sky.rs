@@ -66,8 +66,14 @@ fn test_sky_report_consistency() {
     // Vergleiche mit dem Referenzwert aus weather::
     assert_eq!(report.weather.temperature, weather_ref.temperature);
     assert_eq!(report.weather.windspeed, weather_ref.windspeed);
-    assert_eq!(report.weather.winddirection_deg, weather_ref.winddirection_deg);
-    assert_eq!(report.weather.winddirection, weather::deg_to_compass(weather_ref.winddirection_deg));
+    assert_eq!(
+        report.weather.winddirection_deg,
+        weather_ref.winddirection_deg
+    );
+    assert_eq!(
+        report.weather.winddirection,
+        weather::deg_to_compass(weather_ref.winddirection_deg)
+    );
     assert_eq!(report.weather.weathercode, weather_ref.weathercode);
     assert_eq!(report.weather.time, weather_ref.time);
 }

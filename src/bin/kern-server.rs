@@ -7,7 +7,7 @@ use axum::{
 use chrono::{DateTime, Duration, Local, Utc};
 use kern::core::{
     Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
-    weather, sun,
+    sun, weather,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -155,7 +155,12 @@ async fn lookup_handler(
     } else {
         None
     };
-    Json(LookupResponse { number, meaning, light, shadow })
+    Json(LookupResponse {
+        number,
+        meaning,
+        light,
+        shadow,
+    })
 }
 
 #[derive(Deserialize)]
@@ -195,9 +200,22 @@ async fn lookup_multi_handler(
         if let Ok(n) = s.parse::<u32>() {
             let meaning = lookup(n, &state.map).to_string();
             let entry = state.map.get(&n);
-            let light = if want_light { entry.and_then(|b| b.licht.clone()) } else { None };
-            let shadow = if want_shadow { entry.and_then(|b| b.schatten.clone()) } else { None };
-            items.push(LookupItem { number: n, meaning, light, shadow });
+            let light = if want_light {
+                entry.and_then(|b| b.licht.clone())
+            } else {
+                None
+            };
+            let shadow = if want_shadow {
+                entry.and_then(|b| b.schatten.clone())
+            } else {
+                None
+            };
+            items.push(LookupItem {
+                number: n,
+                meaning,
+                light,
+                shadow,
+            });
         }
     }
     Json(LookupListResponse { items })
@@ -259,12 +277,25 @@ struct WeatherParams {
 async fn weather_handler(
     Query(params): Query<WeatherParams>,
 ) -> Result<Json<weather::CurrentWeather>, (StatusCode, Json<ErrorResponse>)> {
-    let res = tokio::task::spawn_blocking(move || {
-        weather::fetch_current_weather(params.lat, params.lon)
+    let res =
+        tokio::task::spawn_blocking(move || weather::fetch_current_weather(params.lat, params.lon))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ErrorResponse {
+                        error: e.to_string(),
+                    }),
+                )
+            })?;
+    res.map(Json).map_err(|e| {
+        (
+            StatusCode::BAD_GATEWAY,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )
     })
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse { error: e.to_string() })))?;
-    res.map(Json).map_err(|e| (StatusCode::BAD_GATEWAY, Json(ErrorResponse { error: e.to_string() })))
 }
 
 #[derive(Deserialize)]
@@ -283,7 +314,9 @@ async fn sun_handler(
             .map_err(|_| {
                 (
                     StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse { error: "invalid time".into() }),
+                    Json(ErrorResponse {
+                        error: "invalid time".into(),
+                    }),
                 )
             })?
     } else {

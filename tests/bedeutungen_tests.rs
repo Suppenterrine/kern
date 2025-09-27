@@ -1,4 +1,4 @@
-use kern::core::{load_bedeutungen, lookup, Bedeutung};
+use kern::core::{Bedeutung, load_bedeutungen, lookup};
 use std::collections::HashMap;
 
 #[test]
@@ -6,12 +6,17 @@ fn bedeutungen_has_text_light_shadow_for_known_numbers() {
     let map = load_bedeutungen();
 
     // Zahlen, die in bedeutungen.yaml definiert sind
-    let expected = [1u32,2,3,4,5,6,7,8,9,11,22,33];
+    let expected = [1u32, 2, 3, 4, 5, 6, 7, 8, 9, 11, 22, 33];
     for &n in &expected {
         let entry = map.get(&n).expect("missing entry in bedeutungen.yaml");
         assert!(entry.text.as_ref().is_some_and(|s| !s.trim().is_empty()));
         assert!(entry.licht.as_ref().is_some_and(|s| !s.trim().is_empty()));
-        assert!(entry.schatten.as_ref().is_some_and(|s| !s.trim().is_empty()));
+        assert!(
+            entry
+                .schatten
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty())
+        );
     }
 }
 
@@ -63,4 +68,3 @@ fn serde_aliases_for_light_shadow_are_respected() {
     assert_eq!(b2.licht.as_deref(), Some("Licht lang"));
     assert_eq!(b2.schatten.as_deref(), Some("Schatten lang"));
 }
-
