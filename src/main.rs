@@ -34,21 +34,6 @@ fn main() {
                 .help("Prints lookup meanings for all reduced results"),
         )
         .arg(
-            Arg::new("list-ciphers")
-                .long("list-ciphers")
-                .action(ArgAction::SetTrue)
-                .help("Lists all available ciphers and exits"),
-        )
-        .arg(
-            Arg::new("cipher")
-                .short('c')
-                .long("cipher")
-                .value_name("CIPHER")
-                .action(ArgAction::Append)
-                .value_delimiter(',')
-                .help("Cipher(s) to use (repeatable). Use cipher name, shortcode or 'all'"),
-        )
-        .arg(
             Arg::new("light")
                 .long("light")
                 .action(ArgAction::SetTrue)
@@ -61,11 +46,19 @@ fn main() {
                 .help("Shows the shadow meaning column in lookup output"),
         )
         .arg(
-            Arg::new("length")
-                .short('L')
-                .long("length")
+            Arg::new("cipher")
+                .short('c')
+                .long("cipher")
+                .value_name("CIPHER")
+                .action(ArgAction::Append)
+                .value_delimiter(',')
+                .help("Cipher(s) to use (repeatable). Use cipher name, shortcode or 'all'"),
+        )
+        .arg(
+            Arg::new("list-ciphers")
+                .long("list-ciphers")
                 .action(ArgAction::SetTrue)
-                .help("Appends the character length to the result output"),
+                .help("Lists all available ciphers and exits"),
         )
         .arg(
             Arg::new("date")
@@ -75,16 +68,16 @@ fn main() {
                 .allow_hyphen_values(true)
                 .help(
                     r#"Date-Offset/Range:
-    -3, +2, 0+3, 0-3, -5..4, 3..-2, etc.
-    28.07.2025, 26.07.2025..02.08.2025"#,
+                -3, +2, 0+3, 0-3, -5..4, 3..-2, etc.
+                28.07.2025, 26.07.2025..02.08.2025"#,
                 ),
         )
         .arg(
-            Arg::new("debug")
-                .short('v')
-                .long("verbose")
+            Arg::new("length")
+                .short('L')
+                .long("length")
                 .action(ArgAction::SetTrue)
-                .help("Show detailed calculation trace"),
+                .help("Appends the character length to the result output"),
         )
         .arg(
             Arg::new("total")
@@ -92,6 +85,13 @@ fn main() {
                 .long("total")
                 .action(ArgAction::SetTrue)
                 .help("Shows the total sum of all reduced results at the end"),
+        )
+        .arg(
+            Arg::new("debug")
+                .short('v')
+                .long("verbose")
+                .action(ArgAction::SetTrue)
+                .help("Show detailed calculation trace"),
         )
         .arg(
             Arg::new("ARGS")
