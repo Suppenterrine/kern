@@ -3,29 +3,29 @@ pub trait Cipher {
     fn char_to_value(&self, ch: char) -> u32;
 }
 
+mod agrippa;
+mod chaldean;
+mod cubes;
+mod fibonacci;
 mod ordinal;
+mod primes;
 mod pythagorean;
 mod reverse_ordinal;
 mod reverse_pythagorean;
-mod chaldean;
-mod agrippa;
-mod primes;
-mod fibonacci;
-mod squares;
-mod cubes;
 mod septenary;
+mod squares;
 
+pub use agrippa::AgrippaCipher;
+pub use chaldean::ChaldeanCipher;
+pub use cubes::CubesCipher;
+pub use fibonacci::FibonacciCipher;
 pub use ordinal::OrdinalCipher;
+pub use primes::PrimesCipher;
 pub use pythagorean::PythagoreanCipher;
 pub use reverse_ordinal::ReverseOrdinalCipher;
 pub use reverse_pythagorean::ReversePythagoreanCipher;
-pub use chaldean::ChaldeanCipher;
-pub use agrippa::AgrippaCipher;
-pub use primes::PrimesCipher;
-pub use fibonacci::FibonacciCipher;
-pub use squares::SquaresCipher;
-pub use cubes::CubesCipher;
 pub use septenary::SeptenaryCipher;
+pub use squares::SquaresCipher;
 
 pub fn available_cipher_names() -> &'static [&'static str] {
     &[
