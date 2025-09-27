@@ -5,6 +5,7 @@ pub mod core {
     use regex::Regex;
     use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
+    use std::fmt;
 
     #[derive(Debug, Deserialize)]
     pub struct Bedeutung {
@@ -22,6 +23,11 @@ pub mod core {
     #[path = "../core/ciphers/mod.rs"]
     pub mod ciphers;
 
+    #[path = "../core/flow.rs"]
+    pub mod flow;
+
+    pub use flow::Pipeline;
+
     pub use ciphers::{
         Cipher, CipherDescriptor, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher,
         ReversePythagoreanCipher, available_cipher_names, default_cipher, descriptors, get_cipher,
@@ -30,18 +36,40 @@ pub mod core {
     use utils::char_to_value_ordinal;
 
     #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Operation {
+        Reduce,
+        AggregateTotal,
+        DateReduce,
+        Lookup,
+        Custom(String),
+    }
+
+    impl fmt::Display for Operation {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Operation::Reduce => write!(f, "reduce"),
+                Operation::AggregateTotal => write!(f, "aggregate::total"),
+                Operation::DateReduce => write!(f, "date::reduce"),
+                Operation::Lookup => write!(f, "lookup"),
+                Operation::Custom(name) => write!(f, "{name}"),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize)]
     pub struct Step {
         pub pipe_index: usize,
         pub cipher_index: usize,
-        pub operation: String,
+        pub operation: Operation,
     }
 
     impl Step {
-        pub fn new(pipe_index: usize, cipher_index: usize, operation: impl Into<String>) -> Self {
+        pub fn new(pipe_index: usize, cipher_index: usize, operation: Operation) -> Self {
             Self {
                 pipe_index,
                 cipher_index,
-                operation: operation.into(),
+                operation,
             }
         }
     }
@@ -219,7 +247,7 @@ pub mod core {
     }
 
     pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
-        let step = Step::new(0, 0, "reduce");
+        let step = Step::new(0, 0, Operation::Reduce);
         let result = KernResult::from_input_default(input, debug, step);
         if debug {
             for line in &result.trace {
