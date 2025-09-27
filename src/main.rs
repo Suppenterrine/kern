@@ -46,26 +46,26 @@ fn main() {
                 .value_name("CIPHER")
                 .action(ArgAction::Append)
                 .value_delimiter(',')
-                .help("Cipher(s) to use (repeatable). Optionen: ordinal, reverse_ordinal, pythagorean, reverse_pythagorean (or 'all')"),
+                .help("Cipher(s) to use (repeatable). Use cipher name, shortcode or 'all'"),
         )
         .arg(
             Arg::new("light")
                 .long("light")
                 .action(ArgAction::SetTrue)
-                .help("Also shows the light meaning column in lookup output"),
+                .help("Shows the light meaning column in lookup output"),
         )
         .arg(
             Arg::new("shadow")
                 .long("shadow")
                 .action(ArgAction::SetTrue)
-                .help("Also shows the shadow meaning column in lookup output"),
+                .help("Shows the shadow meaning column in lookup output"),
         )
         .arg(
             Arg::new("length")
                 .short('L')
                 .long("length")
                 .action(ArgAction::SetTrue)
-                .help("Hängt die Zeichenlänge an die Ergebnis-Ausgabe an"),
+                .help("Appends the character length to the result output"),
         )
         .arg(
             Arg::new("date")
@@ -74,7 +74,7 @@ fn main() {
                 .value_name("RANGE")
                 .allow_hyphen_values(true)
                 .help(
-                    r#"Datums-Offset/Range:
+                    r#"Date-Offset/Range:
     -3, +2, 0+3, 0-3, -5..4, 3..-2, etc.
     28.07.2025, 26.07.2025..02.08.2025"#,
                 ),
@@ -84,23 +84,23 @@ fn main() {
                 .short('v')
                 .long("verbose")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt die vollständige Reduktionskette für jede Eingabe"),
+                .help("Show detailed calculation trace"),
         )
         .arg(
             Arg::new("total")
                 .short('t')
                 .long("total")
                 .action(ArgAction::SetTrue)
-                .help("Zeigt die Gesamtsumme aller Ergebnisse (reduziert)"),
+                .help("Shows the total sum of all reduced results at the end"),
         )
         .arg(
             Arg::new("ARGS")
                 .num_args(1..)
-                .help("Strings oder Zahlen zur Quersummen-Berechnung"),
+                .help("Input strings to be reduced"),
         )
         .subcommand(
             Command::new("sky")
-                .about("Wetter + Sonnenstand kombiniert")
+                .about("Fetches sky data for given location and time")
                 .arg(
                     Arg::new("lat")
                         .long("lat")
