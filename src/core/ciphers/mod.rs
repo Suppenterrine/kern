@@ -27,44 +27,98 @@ pub use reverse_pythagorean::ReversePythagoreanCipher;
 pub use septenary::SeptenaryCipher;
 pub use squares::SquaresCipher;
 
-pub fn available_cipher_names() -> &'static [&'static str] {
-    &[
-        "ordinal",
-        "reverse_ordinal",
-        "pythagorean",
-        "reverse_pythagorean",
-        "chaldean",
-        "agrippa",
-        "primes",
-        "fibonacci",
-        "squares",
-        "cubes",
-        "septenary",
-    ]
+pub struct CipherDescriptor {
+    pub name: &'static str,
+    pub short: &'static str,
+    pub description: &'static str,
+    pub factory: fn() -> Box<dyn Cipher>,
+}
+
+const CIPHERS: &[CipherDescriptor] = &[
+    CipherDescriptor {
+        name: "ordinal",
+        short: "or",
+        description: "Ordinal (A=1..Z=26)",
+        factory: || Box::new(OrdinalCipher),
+    },
+    CipherDescriptor {
+        name: "reverse_ordinal",
+        short: "ro",
+        description: "Reverse Ordinal (A=26..Z=1)",
+        factory: || Box::new(ReverseOrdinalCipher),
+    },
+    CipherDescriptor {
+        name: "pythagorean",
+        short: "py",
+        description: "Pythagorean / Reduction",
+        factory: || Box::new(PythagoreanCipher),
+    },
+    CipherDescriptor {
+        name: "reverse_pythagorean",
+        short: "rp",
+        description: "Reverse Pythagorean",
+        factory: || Box::new(ReversePythagoreanCipher),
+    },
+    CipherDescriptor {
+        name: "chaldean",
+        short: "ch",
+        description: "Chaldean",
+        factory: || Box::new(ChaldeanCipher),
+    },
+    CipherDescriptor {
+        name: "agrippa",
+        short: "ag",
+        description: "Agrippa Latin",
+        factory: || Box::new(AgrippaCipher),
+    },
+    CipherDescriptor {
+        name: "primes",
+        short: "pr",
+        description: "Prime numbers mapping",
+        factory: || Box::new(PrimesCipher),
+    },
+    CipherDescriptor {
+        name: "fibonacci",
+        short: "fi",
+        description: "Fibonacci sequence mapping",
+        factory: || Box::new(FibonacciCipher),
+    },
+    CipherDescriptor {
+        name: "squares",
+        short: "sq",
+        description: "Square numbers mapping",
+        factory: || Box::new(SquaresCipher),
+    },
+    CipherDescriptor {
+        name: "cubes",
+        short: "cu",
+        description: "Cube numbers mapping",
+        factory: || Box::new(CubesCipher),
+    },
+    CipherDescriptor {
+        name: "septenary",
+        short: "se",
+        description: "Septenary / Base-7",
+        factory: || Box::new(SeptenaryCipher),
+    },
+];
+
+pub fn descriptors() -> &'static [CipherDescriptor] {
+    CIPHERS
+}
+
+pub fn available_cipher_names() -> Vec<&'static str> {
+    CIPHERS.iter().map(|d| d.name).collect()
 }
 
 pub fn default_cipher() -> Box<dyn Cipher> {
-    Box::new(OrdinalCipher)
+    (CIPHERS[0].factory)()
 }
 
 pub fn get_cipher(name: &str) -> Option<Box<dyn Cipher>> {
     let key = name.to_lowercase();
-    match key.as_str() {
-        "ordinal" | "ord" | "or" => Some(Box::new(OrdinalCipher)),
-        "reverse_ordinal" | "rev_ord" | "ro" => {
-            Some(Box::new(ReverseOrdinalCipher))
-        }
-        "pythagorean" | "pyth" | "py" => Some(Box::new(PythagoreanCipher)),
-        "reverse_pythagorean" | "rev_pyth" | "rp" => {
-            Some(Box::new(ReversePythagoreanCipher))
-        }
-        "chaldean" | "chald" | "ch" => Some(Box::new(ChaldeanCipher)),
-        "agrippa" | "agr" | "ag"  => Some(Box::new(AgrippaCipher)),
-        "primes" | "prime" | "pr" => Some(Box::new(PrimesCipher)),
-        "fibonacci" | "fib" | "fi" => Some(Box::new(FibonacciCipher)),
-        "squares" | "square" | "sq" => Some(Box::new(SquaresCipher)),
-        "cubes" | "cube" | "cu" => Some(Box::new(CubesCipher)),
-        "septenary" | "sept" | "se" => Some(Box::new(SeptenaryCipher)),
-        _ => None,
-    }
+    CIPHERS
+        .iter()
+        .find(|descriptor| descriptor.name == key || descriptor.short == key)
+        .map(|descriptor| (descriptor.factory)())
 }

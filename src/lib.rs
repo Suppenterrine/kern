@@ -23,8 +23,8 @@ pub mod core {
     pub mod ciphers;
 
     pub use ciphers::{
-        Cipher, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher, ReversePythagoreanCipher,
-        available_cipher_names, default_cipher, get_cipher,
+        Cipher, CipherDescriptor, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher,
+        ReversePythagoreanCipher, available_cipher_names, default_cipher, descriptors, get_cipher,
     };
 
     use utils::char_to_value_ordinal;
