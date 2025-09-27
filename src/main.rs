@@ -1,7 +1,10 @@
 use chrono::{Duration, Local, Utc};
 use clap::{Arg, ArgAction, Command, value_parser};
-use kern::core::*;
-use prettytable::{Table, row, Row, Cell};
+use kern::core::sky;
+use kern::core::{
+    KernResult, ResultSet, Step, load_bedeutungen, lookup, parse_range, reduce_number_verbose,
+};
+use prettytable::{Cell, Row, Table, row};
 use serde_json;
 
 fn main() {
@@ -12,21 +15,12 @@ fn main() {
 │   KERN™CODE - v{version}   │
 └────────────────────────┘
 
-> decoding symbolic integers...
-> interfacing with resonance layer...
-> parsing STRUCTUR 83...
-
 > SOMA CORE MODULES:
    [ HALTEKRAFT.PROCESSOR ] ......... OK
    [ TRAUMSCHATTEN.EXE ] ............ OK
    [ STIMULUS_MONITOR ] ............. OK (Caution: Overload Risk)
    [ MEMORY.DRIFT.REGULATOR ] ....... FAILED (Recovering)
-
-> AUTHENTICATING USER: "WICKFELD_507"
-   Retinal Echo Match ✓
-   Pulse Resonance ✓
-   Dream Residue ✓
-      "#
+"#
     );
     let matches = Command::new("kern")
         .version(env!("CARGO_PKG_VERSION"))
@@ -223,41 +217,46 @@ fn main() {
 
     /* Standard-Modus: Strings berechnen ---------------------------------- */
     if let Some(args) = matches.get_many::<String>("ARGS") {
-        let mut results = Vec::new(); // ← Ergebnisse sammeln
+        let mut result_set = ResultSet::new(); // linear flow collects all calculation results
 
-        for arg in args {
+        for (pipe_index, arg) in args.enumerate() {
+            let step = Step::new(pipe_index, 0, "reduce");
+            let calc_result = KernResult::from_input_default(arg, debug, step);
+
             if debug {
-                // Debugmodus → nur Reduktionskette
-                let val = reduce_number_verbose(arg, true);
-                results.push(val);
-            } else {
-                // Normale Ausgabe
-                let reduced = reduce_number_verbose(arg, false);
-                if show_length {
-                    let len = arg.chars().count();
-                    println!("{arg}: {reduced} ({len})");
-                } else {
-                    println!("{arg}: {reduced}");
+                for line in &calc_result.trace {
+                    println!("{line}");
                 }
-                results.push(reduced);
+            } else if show_length {
+                let len = arg.chars().count();
+                println!("{arg}: {} ({len})", calc_result.value());
+            } else {
+                println!("{arg}: {}", calc_result.value());
             }
+
+            result_set.add(calc_result);
         }
 
-        // Nach allen Argumenten → Gesamtsumme
         if show_total {
-            let sum: u32 = results.iter().sum();
+            let sum: u32 = result_set.total();
             if debug {
-                // Gesamtkette aus den Einzelergebnissen zeigen
-                let parts: Vec<String> = results.iter().map(|v| v.to_string()).collect();
-                println!("\n→ Gesamtsumme: ({}) = {}", parts.join("+"), sum);
+                let parts: Vec<String> = result_set.values().map(|v| v.to_string()).collect();
+                println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
             }
 
-            let reduced_total = reduce_number_verbose(&sum.to_string(), debug);
+            let total_step = Step::new(result_set.len(), 0, "aggregate::total");
+            let total_result = KernResult::from_numeric_value_default(sum, debug, total_step);
+
             if debug {
-                println!("→ Gesamtsumme: {sum} → {reduced_total}");
+                for line in &total_result.trace {
+                    println!("{line}");
+                }
+                println!("\u{1a} Gesamtsumme: {sum} \u{1a} {}", total_result.value());
             } else {
-                println!("Gesamtsumme: {sum} → {reduced_total}");
+                println!("Gesamtsumme: {sum} \u{1a} {}", total_result.value());
             }
+
+            result_set.add(total_result);
         }
     } else {
         eprintln!("Keine weiteren Argumente angegeben.");

@@ -3,7 +3,7 @@
 pub mod core {
     use chrono::{Local, NaiveDate};
     use regex::Regex;
-    use serde::Deserialize;
+    use serde::{Deserialize, Serialize};
     use std::collections::HashMap;
 
     #[derive(Debug, Deserialize)]
@@ -16,13 +16,154 @@ pub mod core {
         pub schatten: Option<String>,
     }
 
-    pub fn char_to_value(ch: char) -> u32 {
-        match ch {
-            '0'..='9' => ch as u32 - '0' as u32,
-            'A'..='Z' => ch as u32 - 'A' as u32 + 1,
-            'a'..='z' => ch as u32 - 'a' as u32 + 1,
-            _ => 0,
+    pub trait Cipher {
+        fn name(&self) -> &str;
+        fn char_to_value(&self, ch: char) -> u32;
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct OrdinalCipher;
+
+    impl Cipher for OrdinalCipher {
+        fn name(&self) -> &str {
+            "ordinal"
         }
+
+        fn char_to_value(&self, ch: char) -> u32 {
+            match ch {
+                '0'..='9' => ch as u32 - '0' as u32,
+                'A'..='Z' => ch as u32 - 'A' as u32 + 1,
+                'a'..='z' => ch as u32 - 'a' as u32 + 1,
+                _ => 0,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct Step {
+        pub pipe_index: usize,
+        pub cipher_index: usize,
+        pub operation: String,
+    }
+
+    impl Step {
+        pub fn new(pipe_index: usize, cipher_index: usize, operation: impl Into<String>) -> Self {
+            Self {
+                pipe_index,
+                cipher_index,
+                operation: operation.into(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub struct KernResult {
+        pub source: String,
+        pub cipher: String,
+        pub step: Step,
+        pub value: u32,
+        pub verbose: bool,
+        pub trace: Vec<String>,
+    }
+
+    impl KernResult {
+        pub fn new(
+            source: impl Into<String>,
+            cipher: impl Into<String>,
+            step: Step,
+            value: u32,
+            verbose: bool,
+            trace: Vec<String>,
+        ) -> Self {
+            Self {
+                source: source.into(),
+                cipher: cipher.into(),
+                step,
+                value,
+                verbose,
+                trace,
+            }
+        }
+
+        pub fn from_input(input: &str, verbose: bool, cipher: &dyn Cipher, step: Step) -> Self {
+            let (value, trace) = reduce_number_steps_with_cipher(input, cipher);
+            Self::new(input, cipher.name(), step, value, verbose, trace)
+        }
+
+        pub fn from_input_default(input: &str, verbose: bool, step: Step) -> Self {
+            let cipher = OrdinalCipher;
+            Self::from_input(input, verbose, &cipher, step)
+        }
+
+        pub fn from_numeric_value(
+            sum: u32,
+            verbose: bool,
+            cipher: &dyn Cipher,
+            step: Step,
+        ) -> Self {
+            let input = sum.to_string();
+            let (value, trace) = reduce_number_steps_with_cipher(&input, cipher);
+            Self::new(input, cipher.name(), step, value, verbose, trace)
+        }
+
+        pub fn from_numeric_value_default(sum: u32, verbose: bool, step: Step) -> Self {
+            let cipher = OrdinalCipher;
+            Self::from_numeric_value(sum, verbose, &cipher, step)
+        }
+
+        pub fn value(&self) -> u32 {
+            self.value
+        }
+
+        pub fn with_step(mut self, step: Step) -> Self {
+            self.step = step;
+            self
+        }
+    }
+
+    #[derive(Debug, Default, Clone, Serialize)]
+    pub struct ResultSet {
+        pub results: Vec<KernResult>,
+    }
+
+    impl ResultSet {
+        pub fn new() -> Self {
+            Self {
+                results: Vec::new(),
+            }
+        }
+
+        pub fn add(&mut self, result: KernResult) {
+            self.results.push(result);
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &KernResult> {
+            self.results.iter()
+        }
+
+        pub fn is_empty(&self) -> bool {
+            self.results.is_empty()
+        }
+
+        pub fn len(&self) -> usize {
+            self.results.len()
+        }
+
+        pub fn values(&self) -> impl Iterator<Item = u32> + '_ {
+            self.results.iter().map(|r| r.value)
+        }
+
+        pub fn total(&self) -> u32 {
+            self.values().sum()
+        }
+
+        pub fn lookup_value(&self, value: u32) -> Vec<&KernResult> {
+            self.results.iter().filter(|r| r.value == value).collect()
+        }
+    }
+
+    pub fn char_to_value(ch: char) -> u32 {
+        OrdinalCipher.char_to_value(ch)
     }
 
     pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
@@ -38,15 +179,13 @@ pub mod core {
             .unwrap_or("- keine Bedeutung -")
     }
 
-    pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {
-        // Sonderfall: Eingabe ist Masterzahl → sofort zurückgeben
+    pub fn reduce_number_steps_with_cipher(input: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
         if input == "11" || input == "22" || input == "33" {
             let line = format!("{input} ist eine Masterzahl → {input}");
             return (input.parse().unwrap(), vec![line]);
         }
 
-        // 1. Werte der einzelnen Zeichen berechnen
-        let values: Vec<u32> = input.chars().map(char_to_value).collect();
+        let values: Vec<u32> = input.chars().map(|ch| cipher.char_to_value(ch)).collect();
         let mut num: u32 = values.iter().sum();
 
         let mut lines = Vec::new();
@@ -61,7 +200,6 @@ pub mod core {
             num
         ));
 
-        // 2. Reduktionen durchführen
         while num > 9 && !matches!(num, 11 | 22 | 33) {
             let digits: Vec<u32> = num
                 .to_string()
@@ -85,17 +223,23 @@ pub mod core {
         (num, lines)
     }
 
+    pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {
+        let cipher = OrdinalCipher;
+        reduce_number_steps_with_cipher(input, &cipher)
+    }
+
     pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
-        let (num, lines) = reduce_number_steps(input);
+        let step = Step::new(0, 0, "reduce");
+        let result = KernResult::from_input_default(input, debug, step);
         if debug {
-            for line in lines {
+            for line in &result.trace {
                 println!("{line}");
             }
         }
-        num
+        result.value
     }
 
-    pub fn parse_range(spec: &str) -> Result<Vec<i32>, String> {
+    pub fn parse_range(spec: &str) -> std::result::Result<Vec<i32>, String> {
         let today = Local::now().date_naive();
 
         // A) Datums-Range: dd.mm.yyyy..dd.mm.yyyy
@@ -229,14 +373,17 @@ pub mod core {
             DIRS[idx % 16]
         }
 
-        pub fn fetch_current_weather(lat: f64, lon: f64) -> Result<CurrentWeather, reqwest::Error> {
+        pub fn fetch_current_weather(
+            lat: f64,
+            lon: f64,
+        ) -> std::result::Result<CurrentWeather, reqwest::Error> {
             fetch_current_weather_from(lat, lon, "https://api.open-meteo.com")
         }
 
         pub fn fetch_current_weather_view(
             lat: f64,
             lon: f64,
-        ) -> Result<CurrentWeatherView, reqwest::Error> {
+        ) -> std::result::Result<CurrentWeatherView, reqwest::Error> {
             fetch_current_weather(lat, lon).map(|cw| cw.to_view())
         }
 
@@ -244,7 +391,7 @@ pub mod core {
             lat: f64,
             lon: f64,
             base: &str,
-        ) -> Result<CurrentWeather, reqwest::Error> {
+        ) -> std::result::Result<CurrentWeather, reqwest::Error> {
             let url = format!("{base}/v1/forecast");
             let client = Client::new();
             let params = QueryParams {
@@ -337,7 +484,11 @@ pub mod core {
         }
 
         /// Kombinierter Report. `dt` optional; fällt sonst auf `Utc::now()` zurück.
-        pub fn report(lat: f64, lon: f64, dt: Option<DateTime<Utc>>) -> Result<SkyReport, String> {
+        pub fn report(
+            lat: f64,
+            lon: f64,
+            dt: Option<DateTime<Utc>>,
+        ) -> std::result::Result<SkyReport, String> {
             let w = weather::fetch_current_weather(lat, lon)
                 .map_err(|e| format!("weather error: {e}"))?;
 
