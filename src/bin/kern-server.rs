@@ -4,10 +4,9 @@ use axum::{
     http::StatusCode,
     routing::get,
 };
-use chrono::{DateTime, Duration, Local, Utc};
+use chrono::{Duration, Local};
 use kern::core::{
     Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
-    sun, weather,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -268,64 +267,6 @@ async fn date_handler(
     Ok(Json(DateResponse { dates }))
 }
 
-#[derive(Deserialize)]
-struct WeatherParams {
-    lat: f64,
-    lon: f64,
-}
-
-async fn weather_handler(
-    Query(params): Query<WeatherParams>,
-) -> Result<Json<weather::CurrentWeather>, (StatusCode, Json<ErrorResponse>)> {
-    let res =
-        tokio::task::spawn_blocking(move || weather::fetch_current_weather(params.lat, params.lon))
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: e.to_string(),
-                    }),
-                )
-            })?;
-    res.map(Json).map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-    })
-}
-
-#[derive(Deserialize)]
-struct SunParams {
-    lat: f64,
-    lon: f64,
-    time: Option<String>,
-}
-
-async fn sun_handler(
-    Query(params): Query<SunParams>,
-) -> Result<Json<sun::SolarPos>, (StatusCode, Json<ErrorResponse>)> {
-    let dt = if let Some(t) = params.time {
-        DateTime::parse_from_rfc3339(&t)
-            .map(|d| d.with_timezone(&Utc))
-            .map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: "invalid time".into(),
-                    }),
-                )
-            })?
-    } else {
-        Utc::now()
-    };
-    let pos = sun::solar_position(params.lat, params.lon, dt);
-    Ok(Json(pos))
-}
-
 #[tokio::main]
 async fn main() {
     let map = load_bedeutungen();
@@ -336,8 +277,6 @@ async fn main() {
         .route("/lookup", get(lookup_multi_handler))
         .route("/lookup/:number", get(lookup_handler))
         .route("/date", get(date_handler))
-        .route("/weather", get(weather_handler))
-        .route("/sun", get(sun_handler))
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
