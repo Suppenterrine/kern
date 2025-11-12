@@ -50,6 +50,7 @@ fn main() {
             Arg::new("cipher")
                 .long("cipher")
                 .value_name("CIPHER")
+                .num_args(1)
                 .action(ArgAction::Append)
                 .value_delimiter(',')
                 .help("Cipher(s) to use (repeatable). Use cipher name, shortcode or 'all'"),
@@ -281,6 +282,9 @@ fn main() {
         let args = parsed.inputs;
         let reduce_steps = parsed.steps;
 
+        // Save original global cipher names before adding local ciphers
+        let global_cipher_names = cipher_labels.clone();
+
         ensure_local_ciphers(&mut selected_ciphers, &mut cipher_labels, &reduce_steps);
 
         let mut pipeline = Pipeline::new();
@@ -300,7 +304,7 @@ fn main() {
 
         let mut ctx = FlowContext::new(FlowFlags {
             verbose: debug,
-            ciphers: cipher_labels.clone(),
+            ciphers: global_cipher_names,
             total: show_total,
         });
 

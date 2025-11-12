@@ -60,7 +60,7 @@ impl Pipeline {
             match &step.operation {
                 Operation::Reduce | Operation::DateReduce => {
                     if let Some(input) = inputs.get(step.pipe_index) {
-                        for (cipher_index, cipher) in self.select_ciphers(step, ciphers) {
+                        for (cipher_index, cipher) in self.select_ciphers(step, ciphers, &ctx.global_flags.ciphers) {
                             let mut ctx_step = step.clone();
                             ctx_step.cipher_index = cipher_index;
 
@@ -175,33 +175,49 @@ impl Pipeline {
         &self,
         step: &Step,
         ciphers: &'a [Box<dyn Cipher>],
+        global_cipher_names: &[String],
     ) -> Vec<(usize, &'a Box<dyn Cipher>)> {
-        if let Some(names) = &step.local_flags.ciphers {
-            let mut selected = Vec::new();
-            for (idx, cipher) in ciphers.iter().enumerate() {
-                if names
-                    .iter()
-                    .any(|name| name.eq_ignore_ascii_case(cipher.name()))
-                {
-                    selected.push((idx, cipher));
-                }
-            }
+        use std::collections::HashSet;
 
-            if selected.is_empty() {
-                ciphers
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, cipher)| (idx, cipher))
-                    .collect()
-            } else {
-                selected
+        // Build the set of cipher names to use
+        let mut target_names: HashSet<String> = global_cipher_names
+            .iter()
+            .map(|s| s.to_lowercase())
+            .collect();
+
+        // If local ciphers specified, ADD them to the global set (additive behavior)
+        if let Some(local_names) = &step.local_flags.ciphers {
+            for name in local_names {
+                target_names.insert(name.to_lowercase());
             }
-        } else {
+        }
+
+        // If no target names (no global, no local), return all ciphers
+        if target_names.is_empty() {
+            return ciphers
+                .iter()
+                .enumerate()
+                .map(|(idx, cipher)| (idx, cipher))
+                .collect();
+        }
+
+        // Filter ciphers to match the target names
+        let mut selected = Vec::new();
+        for (idx, cipher) in ciphers.iter().enumerate() {
+            if target_names.contains(&cipher.name().to_lowercase()) {
+                selected.push((idx, cipher));
+            }
+        }
+
+        // Fallback: if no matches found, return all ciphers
+        if selected.is_empty() {
             ciphers
                 .iter()
                 .enumerate()
                 .map(|(idx, cipher)| (idx, cipher))
                 .collect()
+        } else {
+            selected
         }
     }
 }
