@@ -4,7 +4,8 @@
       "Bash(cargo --version:*)",
       "Bash(cargo build --help:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []
