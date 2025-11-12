@@ -124,14 +124,14 @@ struct LookupResponse {
     number: u32,
     meaning: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    light: Option<String>,
+    positive: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    shadow: Option<String>,
+    negative: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct LookupPartsParam {
-    parts: Option<String>, // "light", "shadow", "both"
+    parts: Option<String>, // "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
 }
 
 async fn lookup_handler(
@@ -142,14 +142,17 @@ async fn lookup_handler(
     let meaning = lookup(number, &state.map).to_string();
     let entry = state.map.get(&number);
     let sel = param.parts.as_deref();
-    let want_light = matches!(sel, Some("light") | Some("both"));
-    let want_shadow = matches!(sel, Some("shadow") | Some("both"));
-    let light = if want_light {
+
+    // Support both new ("pos"/"neg"/"full") and legacy ("light"/"shadow") parameter names
+    let want_positive = matches!(sel, Some("pos") | Some("light") | Some("both") | Some("full"));
+    let want_negative = matches!(sel, Some("neg") | Some("shadow") | Some("both") | Some("full"));
+
+    let positive = if want_positive {
         entry.and_then(|b| b.licht.clone())
     } else {
         None
     };
-    let shadow = if want_shadow {
+    let negative = if want_negative {
         entry.and_then(|b| b.schatten.clone())
     } else {
         None
@@ -157,15 +160,15 @@ async fn lookup_handler(
     Json(LookupResponse {
         number,
         meaning,
-        light,
-        shadow,
+        positive,
+        negative,
     })
 }
 
 #[derive(Deserialize)]
 struct LookupParams {
     numbers: String,
-    parts: Option<String>, // optional: "light", "shadow", "both"
+    parts: Option<String>, // optional: "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
 }
 
 #[derive(Serialize)]
@@ -173,9 +176,9 @@ struct LookupItem {
     number: u32,
     meaning: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    light: Option<String>,
+    positive: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    shadow: Option<String>,
+    negative: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -189,8 +192,11 @@ async fn lookup_multi_handler(
 ) -> Json<LookupListResponse> {
     let mut items = Vec::new();
     let sel = params.parts.as_deref();
-    let want_light = matches!(sel, Some("light") | Some("both"));
-    let want_shadow = matches!(sel, Some("shadow") | Some("both"));
+
+    // Support both new and legacy parameter names
+    let want_positive = matches!(sel, Some("pos") | Some("light") | Some("both") | Some("full"));
+    let want_negative = matches!(sel, Some("neg") | Some("shadow") | Some("both") | Some("full"));
+
     for part in params.numbers.split(',') {
         let s = part.trim();
         if s.is_empty() {
@@ -199,12 +205,12 @@ async fn lookup_multi_handler(
         if let Ok(n) = s.parse::<u32>() {
             let meaning = lookup(n, &state.map).to_string();
             let entry = state.map.get(&n);
-            let light = if want_light {
+            let positive = if want_positive {
                 entry.and_then(|b| b.licht.clone())
             } else {
                 None
             };
-            let shadow = if want_shadow {
+            let negative = if want_negative {
                 entry.and_then(|b| b.schatten.clone())
             } else {
                 None
@@ -212,8 +218,8 @@ async fn lookup_multi_handler(
             items.push(LookupItem {
                 number: n,
                 meaning,
-                light,
-                shadow,
+                positive,
+                negative,
             });
         }
     }

@@ -5,7 +5,9 @@
       "Bash(cargo build --help:*)",
       "Bash(cargo build:*)",
       "Bash(cargo run:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

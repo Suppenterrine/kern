@@ -4,7 +4,6 @@ use kern::core::{
     Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepFlags,
     default_cipher, descriptors, get_cipher, load_bedeutungen, parse_range,
 };
-use prettytable::{Cell, Row, Table};
 use serde::Deserialize;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -35,16 +34,22 @@ fn main() {
                 .help("Prints lookup meanings for all reduced results"),
         )
         .arg(
-            Arg::new("light")
-                .long("light")
+            Arg::new("pos")
+                .long("pos")
                 .action(ArgAction::SetTrue)
-                .help("Shows the light meaning column in lookup output"),
+                .help("Shows positive aspects in lookup output"),
         )
         .arg(
-            Arg::new("shadow")
-                .long("shadow")
+            Arg::new("neg")
+                .long("neg")
                 .action(ArgAction::SetTrue)
-                .help("Shows the shadow meaning column in lookup output"),
+                .help("Shows negative aspects in lookup output"),
+        )
+        .arg(
+            Arg::new("full")
+                .long("full")
+                .action(ArgAction::SetTrue)
+                .help("Shows complete meaning including positive and negative aspects"),
         )
         .arg(
             Arg::new("cipher")
@@ -105,26 +110,19 @@ fn main() {
     let mut show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
     let mut show_lookup = matches.get_flag("lookup");
-    let show_light = matches.get_flag("light");
-    let show_shadow = matches.get_flag("shadow");
+    let show_pos = matches.get_flag("pos");
+    let show_neg = matches.get_flag("neg");
+    let show_full = matches.get_flag("full");
 
     if matches.get_flag("list-ciphers") {
-        let mut table = Table::new();
-        table.add_row(Row::new(vec![
-            Cell::new("Name"),
-            Cell::new("Short"),
-            Cell::new("Description"),
-        ]));
-
+        println!("Available Ciphers:\n");
         for descriptor in descriptors() {
-            table.add_row(Row::new(vec![
-                Cell::new(descriptor.name),
-                Cell::new(descriptor.short),
-                Cell::new(descriptor.description),
-            ]));
+            println!("  {} ({}) · {}",
+                descriptor.name,
+                descriptor.short,
+                descriptor.description
+            );
         }
-
-        table.printstd();
         return;
     }
 
@@ -225,33 +223,19 @@ fn main() {
                         println!();
                     }
                 } else {
-                    let mut table = Table::new();
-                    let mut header = vec![Cell::new("Offset"), Cell::new("Datum")];
-                    for label in &cipher_labels {
-                        header.push(Cell::new(label));
-                    }
-                    table.add_row(Row::new(header));
-
                     for (row_index, off) in offsets.iter().enumerate() {
                         let display_date = formatted_dates[row_index];
-                        let mut row_cells = vec![
-                            Cell::new(&format!("{:+}", off)),
-                            Cell::new(&display_date.format("%d.%m.%Y").to_string()),
-                        ];
+                        print!("{:+} ({})", off, display_date.format("%d.%m.%Y"));
 
                         if let Some(row_results) = results_matrix.get(row_index) {
                             for maybe_result in row_results {
-                                let value = maybe_result
-                                    .map(|result| result.value().to_string())
-                                    .unwrap_or_else(|| "-".to_string());
-                                row_cells.push(Cell::new(&value));
+                                if let Some(result) = maybe_result {
+                                    print!("  [{}]: {}", result.cipher, result.value());
+                                }
                             }
                         }
-
-                        table.add_row(Row::new(row_cells));
+                        println!();
                     }
-
-                    table.printstd();
                 }
             }
             Err(e) => eprintln!("{e}"),
@@ -399,54 +383,63 @@ fn main() {
                 Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
                     Ok(entries) if !entries.is_empty() => {
                         let bedeutungen = load_bedeutungen();
-                        let mut table = Table::new();
-                        let mut header = vec![
-                            Cell::new("Quellen"),
-                            Cell::new("Zahl"),
-                            Cell::new("Bedeutung"),
-                        ];
-                        if show_light {
-                            header.push(Cell::new("Light"));
-                        }
-                        if show_shadow {
-                            header.push(Cell::new("Shadow"));
-                        }
-                        table.add_row(Row::new(header));
 
                         for entry in entries {
-                            let sources = entry.sources.join(", ");
-                            let value_str = entry.value.to_string();
-                            let bedeutung_entry = bedeutungen.get(&entry.value);
+                            let bedeutung = bedeutungen.get(&entry.value);
+                            let bedeutung_text = bedeutung
+                                .and_then(|b| b.text.as_deref())
+                                .unwrap_or("-");
 
-                            let mut cells = vec![
-                                Cell::new(&sources),
-                                Cell::new(&value_str),
-                                Cell::new(
-                                    bedeutung_entry
-                                        .and_then(|b| b.text.as_deref())
-                                        .unwrap_or("-"),
-                                ),
-                            ];
+                            // Header: Number · Meaning
+                            println!("{} · {}", entry.value, bedeutung_text);
 
-                            if show_light {
-                                cells.push(Cell::new(
-                                    bedeutung_entry
-                                        .and_then(|b| b.licht.as_deref())
-                                        .unwrap_or("-"),
-                                ));
-                            }
-                            if show_shadow {
-                                cells.push(Cell::new(
-                                    bedeutung_entry
-                                        .and_then(|b| b.schatten.as_deref())
-                                        .unwrap_or("-"),
-                                ));
+                            // Sources (with tree-like structure)
+                            if !show_full && !entry.sources.is_empty() {
+                                for (i, source) in entry.sources.iter().enumerate() {
+                                    let prefix = if i == entry.sources.len() - 1 { "└─" } else { "├─" };
+                                    println!("  {} {}", prefix, source);
+                                }
                             }
 
-                            table.add_row(Row::new(cells));
+                            // Full mode: show sources header + pos/neg
+                            if show_full {
+                                if !entry.sources.is_empty() {
+                                    println!("  Quellen:");
+                                    for (i, source) in entry.sources.iter().enumerate() {
+                                        let prefix = if i == entry.sources.len() - 1 { "└─" } else { "├─" };
+                                        println!("    {} {}", prefix, source);
+                                    }
+                                }
+
+                                // Show positive aspects
+                                if let Some(pos_text) = bedeutung.and_then(|b| b.licht.as_deref()) {
+                                    println!("\n  ⊕ Positiv:");
+                                    println!("    {}", pos_text);
+                                }
+
+                                // Show negative aspects
+                                if let Some(neg_text) = bedeutung.and_then(|b| b.schatten.as_deref()) {
+                                    println!("\n  ⊖ Negativ:");
+                                    println!("    {}", neg_text);
+                                }
+                            }
+
+                            // Individual pos/neg flags (only if not in full mode)
+                            if !show_full && show_pos {
+                                if let Some(pos_text) = bedeutung.and_then(|b| b.licht.as_deref()) {
+                                    println!("\n  ⊕ Positiv:");
+                                    println!("    {}", pos_text);
+                                }
+                            }
+                            if !show_full && show_neg {
+                                if let Some(neg_text) = bedeutung.and_then(|b| b.schatten.as_deref()) {
+                                    println!("\n  ⊖ Negativ:");
+                                    println!("    {}", neg_text);
+                                }
+                            }
+
+                            println!();
                         }
-
-                        table.printstd();
                     }
                     Ok(_) => println!("Keine reduzierten Ergebnisse für Lookup."),
                     Err(_) => println!("Lookup-Auswertung konnte nicht gelesen werden."),
