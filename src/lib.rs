@@ -1,5 +1,7 @@
 //! Öffentliche Kern-API für Tests & Binary
 
+pub mod ui;
+
 pub mod core {
     use chrono::{Local, NaiveDate};
     use regex::Regex;
@@ -225,8 +227,7 @@ pub mod core {
 
         let mut lines = Vec::new();
         lines.push(format!(
-            "{} → [{}] = {}",
-            input,
+            "{} = {}",
             values
                 .iter()
                 .map(|v| v.to_string())
@@ -243,7 +244,7 @@ pub mod core {
                 .collect();
             let sum: u32 = digits.iter().sum();
             lines.push(format!(
-                "→ {} = {}",
+                "{} = {}",
                 digits
                     .iter()
                     .map(|d| d.to_string())
@@ -254,7 +255,7 @@ pub mod core {
             num = sum;
         }
 
-        lines.push(format!("→ Quersumme: {num}"));
+        lines.push(format!("→ {num}"));
         (num, lines)
     }
 

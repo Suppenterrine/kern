@@ -40,7 +40,7 @@ fn test_reduce_number_steps_chain() {
     let (val, chain) = reduce_number_steps("feldmann");
     assert_eq!(val, 6);
     assert!(!chain.is_empty());
-    assert!(chain.last().unwrap().contains("Quersumme"));
+    assert!(chain.last().unwrap().starts_with("→"));
 }
 
 //

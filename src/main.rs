@@ -4,6 +4,7 @@ use kern::core::{
     Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepFlags,
     default_cipher, descriptors, get_cipher, load_bedeutungen, parse_range,
 };
+use kern::ui;
 use serde::Deserialize;
 use serde_json;
 use std::collections::{HashMap, HashSet};
@@ -12,15 +13,9 @@ fn main() {
     let version = env!("CARGO_PKG_VERSION");
     let about = format!(
         r#"
-┌────────────────────────┐
-│   KERN™CODE - v{version}   │
-└────────────────────────┘
-
-> SOMA CORE MODULES:
-   [ HALTEKRAFT.PROCESSOR ] ......... OK
-   [ TRAUMSCHATTEN.EXE ] ............ OK
-   [ STIMULUS_MONITOR ] ............. OK (Caution: Overload Risk)
-   [ MEMORY.DRIFT.REGULATOR ] ....... FAILED (Recovering)
+┌───────────────────┐
+│   KERN - v{version}   │
+└───────────────────┘
 "#
     );
     let matches = Command::new("kern")
@@ -115,14 +110,11 @@ fn main() {
     let show_full = matches.get_flag("full");
 
     if matches.get_flag("list-ciphers") {
-        println!("Available Ciphers:\n");
-        for descriptor in descriptors() {
-            println!("  {} ({}) · {}",
-                descriptor.name,
-                descriptor.short,
-                descriptor.description
-            );
-        }
+        let cipher_list: Vec<(String, String, String)> = descriptors()
+            .into_iter()
+            .map(|d| (d.name.to_string(), d.short.to_string(), d.description.to_string()))
+            .collect();
+        ui::output::format_cipher_list(&cipher_list);
         return;
     }
 
@@ -181,6 +173,11 @@ fn main() {
                     pipeline.add_step(Step::new(idx, 0, Operation::DateReduce));
                 }
 
+                // Add lookup operation if requested
+                if show_lookup {
+                    pipeline.add_step(Step::new(0, 0, Operation::Lookup));
+                }
+
                 let mut ctx = FlowContext::new(FlowFlags {
                     verbose: debug,
                     ciphers: cipher_labels.clone(),
@@ -205,41 +202,94 @@ fn main() {
                 if ctx.global_flags.verbose {
                     for (row_index, off) in offsets.iter().enumerate() {
                         let display_date = formatted_dates[row_index];
-                        println!("Datum {:+}: {}", off, display_date.format("%d.%m.%Y"));
+                        let date_str = display_date.format("%d.%m.%Y").to_string();
 
                         if let Some(row_results) = results_matrix.get(row_index) {
                             for maybe_result in row_results {
                                 if let Some(result) = maybe_result {
                                     if result.verbose {
-                                        println!("[{}]", result.cipher);
-                                        for line in &result.trace {
-                                            println!("{line}");
-                                        }
+                                        ui::output::format_date_verbose(
+                                            *off,
+                                            &date_str,
+                                            &result.cipher,
+                                            &result.trace,
+                                            result.value(),
+                                        );
+                                        ui::spacing(ui::SPACING_SECTION);
                                     }
                                 }
                             }
                         }
-
-                        println!();
                     }
                 } else {
                     for (row_index, off) in offsets.iter().enumerate() {
                         let display_date = formatted_dates[row_index];
-                        print!("{:+} ({})", off, display_date.format("%d.%m.%Y"));
+                        let date_str = display_date.format("%d.%m.%Y").to_string();
 
                         if let Some(row_results) = results_matrix.get(row_index) {
                             for maybe_result in row_results {
                                 if let Some(result) = maybe_result {
-                                    print!("  [{}]: {}", result.cipher, result.value());
+                                    ui::output::format_date_simple(
+                                        *off,
+                                        &date_str,
+                                        result.value(),
+                                        &result.cipher,
+                                    );
+                                    println!();
                                 }
                             }
                         }
-                        println!();
+                    }
+                }
+
+                // Handle lookup if requested
+                if show_lookup {
+                    #[derive(Deserialize)]
+                    struct LookupEntry {
+                        value: u32,
+                        sources: Vec<String>,
+                    }
+
+                    let lookup_results: Vec<&KernResult> = result_set
+                        .iter()
+                        .filter(|r| matches!(r.step.operation, Operation::Lookup))
+                        .collect();
+
+                    let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
+
+                    match payload {
+                        Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
+                            Ok(entries) if !entries.is_empty() => {
+                                let bedeutungen = load_bedeutungen();
+
+                                ui::spacing(ui::SPACING_MODE);
+
+                                for entry in entries {
+                                    let bedeutung = bedeutungen.get(&entry.value);
+                                    let bedeutung_text = bedeutung
+                                        .and_then(|b| b.text.as_deref())
+                                        .unwrap_or("-");
+
+                                    ui::output::format_lookup_entry(
+                                        entry.value,
+                                        bedeutung_text,
+                                        &entry.sources,
+                                        bedeutung,
+                                        show_pos,
+                                        show_neg,
+                                        show_full,
+                                    );
+                                }
+                            }
+                            _ => {}
+                        },
+                        None => {}
                     }
                 }
             }
             Err(e) => eprintln!("{e}"),
         }
+        return; // Date processing complete, exit early
     }
 
     /* --length Flag gesetzt? -------------------------------------------- */
@@ -256,7 +306,6 @@ fn main() {
         };
 
         if parsed.inputs.is_empty() {
-            eprintln!("Keine weiteren Argumente angegeben.");
             return;
         }
 
@@ -312,22 +361,57 @@ fn main() {
         let cipher_count = selected_ciphers.len();
 
         if cipher_count > 0 {
+            // Group results by input
+            let mut grouped_by_input: HashMap<&str, Vec<(&str, u32, bool, &[String])>> = HashMap::new();
+
             for (pipe_index, arg) in args.iter().enumerate() {
                 for cipher_index in 0..cipher_count {
                     if let Some(result) = base_results.get(&(pipe_index, cipher_index)) {
-                        let result = *result;
-                        if result.verbose {
-                            println!("{} [{}]", arg, result.cipher);
-                            for line in &result.trace {
-                                println!("{line}");
+                        grouped_by_input
+                            .entry(arg.as_str())
+                            .or_insert_with(Vec::new)
+                            .push((
+                                result.cipher.as_str(),
+                                result.value(),
+                                result.verbose,
+                                result.trace.as_slice(),
+                            ));
+                    }
+                }
+            }
+
+            // Output results by input order
+            for arg in &args {
+                if let Some(results) = grouped_by_input.get(arg.as_str()) {
+                    // Check if any result is verbose
+                    let any_verbose = results.iter().any(|(_, _, verbose, _)| *verbose);
+
+                    if any_verbose {
+                        // Verbose mode - show each cipher separately
+                        for (cipher, value, verbose, trace) in results {
+                            if *verbose {
+                                ui::output::format_verbose_reduction(arg, cipher, trace, *value);
+                                ui::spacing(ui::SPACING_SECTION);
                             }
-                            println!();
-                        } else if show_length {
-                            let len = arg.chars().count();
-                            println!("{arg} [{}]: {} ({len})", result.cipher, result.value());
-                        } else {
-                            println!("{arg} [{}]: {}", result.cipher, result.value());
                         }
+                    } else if show_length {
+                        // Length mode - show inline format
+                        let len = arg.chars().count();
+                        if results.len() == 1 {
+                            println!("{} {} {} [{}] ({})", arg, ui::ARROW_RIGHT, results[0].1, results[0].0, len);
+                        } else {
+                            println!("{} ({})", arg, len);
+                            for (cipher, value, _, _) in results {
+                                println!("{}{}  {} {}", ui::INDENT_BASE, cipher, ui::ARROW_RIGHT, value);
+                            }
+                        }
+                    } else {
+                        // Standard mode - use grouped format
+                        let simple_results: Vec<(String, u32)> = results
+                            .iter()
+                            .map(|(cipher, value, _, _)| (cipher.to_string(), *value))
+                            .collect();
+                        ui::output::format_reduce_grouped(arg, &simple_results);
                     }
                 }
             }
@@ -346,26 +430,18 @@ fn main() {
                 .collect();
 
             let sum: u32 = relevant.iter().map(|res| res.value()).sum();
-            let totals_verbose = aggregate_results.iter().any(|res| res.verbose);
-            let parts: Vec<String> = if totals_verbose {
-                relevant.iter().map(|res| res.value().to_string()).collect()
-            } else {
-                Vec::new()
-            };
-            let mut printed_parts = false;
+            let parts: Vec<u32> = relevant.iter().map(|res| res.value()).collect();
 
             for total_result in aggregate_results {
                 if total_result.verbose {
-                    if !printed_parts && !parts.is_empty() {
-                        println!("\n\u{1a} Gesamtsumme: ({}) = {}", parts.join("+"), sum);
-                        printed_parts = true;
-                    }
-                    for line in &total_result.trace {
-                        println!("{line}");
-                    }
-                    println!("\u{1a} Gesamtsumme: {sum} \u{1a} {}", total_result.value());
+                    ui::output::format_total_verbose(
+                        &parts,
+                        sum,
+                        &total_result.trace,
+                        total_result.value(),
+                    );
                 } else {
-                    println!("Gesamtsumme: {sum} \u{1a} {}", total_result.value());
+                    ui::output::format_total_simple(sum, total_result.value());
                 }
             }
         }
@@ -384,67 +460,28 @@ fn main() {
                     Ok(entries) if !entries.is_empty() => {
                         let bedeutungen = load_bedeutungen();
 
+                        ui::spacing(ui::SPACING_MODE);
+
                         for entry in entries {
                             let bedeutung = bedeutungen.get(&entry.value);
                             let bedeutung_text = bedeutung
                                 .and_then(|b| b.text.as_deref())
                                 .unwrap_or("-");
 
-                            // Header: Number · Meaning
-                            println!("{} · {}", entry.value, bedeutung_text);
-
-                            // Sources (with tree-like structure)
-                            if !show_full && !entry.sources.is_empty() {
-                                for (i, source) in entry.sources.iter().enumerate() {
-                                    let prefix = if i == entry.sources.len() - 1 { "└─" } else { "├─" };
-                                    println!("  {} {}", prefix, source);
-                                }
-                            }
-
-                            // Full mode: show sources header + pos/neg
-                            if show_full {
-                                if !entry.sources.is_empty() {
-                                    println!("  Quellen:");
-                                    for (i, source) in entry.sources.iter().enumerate() {
-                                        let prefix = if i == entry.sources.len() - 1 { "└─" } else { "├─" };
-                                        println!("    {} {}", prefix, source);
-                                    }
-                                }
-
-                                // Show positive aspects
-                                if let Some(pos_text) = bedeutung.and_then(|b| b.licht.as_deref()) {
-                                    println!("\n  ⊕ Positiv:");
-                                    println!("    {}", pos_text);
-                                }
-
-                                // Show negative aspects
-                                if let Some(neg_text) = bedeutung.and_then(|b| b.schatten.as_deref()) {
-                                    println!("\n  ⊖ Negativ:");
-                                    println!("    {}", neg_text);
-                                }
-                            }
-
-                            // Individual pos/neg flags (only if not in full mode)
-                            if !show_full && show_pos {
-                                if let Some(pos_text) = bedeutung.and_then(|b| b.licht.as_deref()) {
-                                    println!("\n  ⊕ Positiv:");
-                                    println!("    {}", pos_text);
-                                }
-                            }
-                            if !show_full && show_neg {
-                                if let Some(neg_text) = bedeutung.and_then(|b| b.schatten.as_deref()) {
-                                    println!("\n  ⊖ Negativ:");
-                                    println!("    {}", neg_text);
-                                }
-                            }
-
-                            println!();
+                            ui::output::format_lookup_entry(
+                                entry.value,
+                                bedeutung_text,
+                                &entry.sources,
+                                bedeutung,
+                                show_pos,
+                                show_neg,
+                                show_full,
+                            );
                         }
                     }
-                    Ok(_) => println!("Keine reduzierten Ergebnisse für Lookup."),
-                    Err(_) => println!("Lookup-Auswertung konnte nicht gelesen werden."),
+                    _ => {}
                 },
-                None => println!("Keine reduzierten Ergebnisse für Lookup."),
+                None => {}
             }
         }
         if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
@@ -452,9 +489,8 @@ fn main() {
                 eprintln!("[KERN DEBUG] ResultSet = {debug_json}");
             }
         }
-    } else {
-        eprintln!("Keine weiteren Argumente angegeben.");
     }
+    // Note: If no ARGS provided, quietly exit (no error message needed)
 }
 fn build_cipher_alias_map(cipher_labels: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();

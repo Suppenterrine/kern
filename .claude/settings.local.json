@@ -7,7 +7,13 @@
       "Bash(cargo run:*)",
       "WebSearch",
       "Bash(git checkout:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "WebFetch(domain:clig.dev)",
+      "WebFetch(domain:code.claude.com)",
+      "Bash(./target/release/kern.exe:*)",
+      "Bash(xargs ./target/release/kern.exe)",
+      "Bash(cargo test:*)"
     ],
     "deny": [],
     "ask": []
