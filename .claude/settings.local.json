@@ -13,7 +13,9 @@
       "WebFetch(domain:code.claude.com)",
       "Bash(./target/release/kern.exe:*)",
       "Bash(xargs ./target/release/kern.exe)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(curl:*)",
+      "Bash(python -m json.tool:*)"
     ],
     "deny": [],
     "ask": []

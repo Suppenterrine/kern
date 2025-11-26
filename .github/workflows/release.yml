@@ -88,3 +88,4 @@ jobs:
             .
           docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }}
           docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:latest
+        # Note: Watchtower on the server will automatically pull and deploy the latest image

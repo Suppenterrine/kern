@@ -157,33 +157,158 @@ $ kern input1 input2 -c chaldean input3
 
 ### Start
 
+**Lokal:**
 ```bash
 $ kern-server
-Listening on http://0.0.0.0:3000
+KERN Server v1.0.2 listening on http://0.0.0.0:3000
 ```
+
+**Docker:**
+```bash
+docker pull 24biteggplant/kern-server:latest
+docker run -d -p 3000:3000 --name kern-server 24biteggplant/kern-server:latest
+```
+
+**Live API:**
+```
+https://kern.drehraum.wtf
+```
+
+---
 
 ### REST-API Endpoints
 
-#### `GET /reduce`
+#### `GET /`
 
-Reduziert ein oder mehrere Inputs.
-
-**Parameter:**
-- `input` (erforderlich): Kommagetrennte Eingaben
-- `debug` (optional): `true` für Berechnungsschritte
-- `length` (optional): `true` für Wort-Längen
-- `onlyTotal` (optional): `true` für nur die Gesamtsumme
+API-Übersicht mit allen verfügbaren Endpunkten und Beispielen.
 
 **Beispiel:**
 ```bash
-$ curl "http://localhost:3000/reduce?input=hello,world"
+$ curl "https://kern.drehraum.wtf/"
+
+{
+  "name": "KERN API",
+  "version": "1.0.2",
+  "endpoints": [...],
+  "examples": {...}
+}
+```
+
+#### `GET /version`
+
+Gibt Name und Versionsnummer zurück.
+
+**Beispiel:**
+```bash
+$ curl "https://kern.drehraum.wtf/version"
+
+{
+  "name": "kern",
+  "version": "1.0.2"
+}
+```
+
+#### `GET /reduce`
+
+Reduziert ein oder mehrere Inputs mit einem oder mehreren Chiffren.
+
+**Parameter:**
+- `input` (erforderlich): Kommagetrennte Eingaben
+- `cipher` (optional): Kommagetrennte Cipher-Codes oder `all`
+- `debug` (optional): `true` für Berechnungsschritte (chains)
+- `length` (optional): `true` für Wort-Längen
+- `onlyTotal` (optional): `true` für nur die Gesamtsumme
+
+**Beispiele:**
+
+**Einfache Reduktion:**
+```bash
+$ curl "https://kern.drehraum.wtf/reduce?input=Wickfeld"
 
 {
   "items": [
-    {"value": 3, "length": 5},
-    {"value": 6, "length": 5}
+    {
+      "input": "Wickfeld",
+      "value": 1
+    }
   ],
-  "total": 9
+  "total": 1
+}
+```
+
+**Multi-Input:**
+```bash
+$ curl "https://kern.drehraum.wtf/reduce?input=Test,Love,Life"
+
+{
+  "items": [
+    {"input": "Test", "value": 1},
+    {"input": "Love", "value": 9},
+    {"input": "Life", "value": 3}
+  ],
+  "total": 4
+}
+```
+
+**Multi-Cipher:**
+```bash
+$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=or,py,ch"
+
+{
+  "items": [
+    {
+      "input": "Test",
+      "ciphers": [
+        {"name": "ordinal", "code": "or", "value": 1},
+        {"name": "pythagorean", "code": "py", "value": 1},
+        {"name": "chaldean", "code": "ch", "value": 4}
+      ]
+    }
+  ],
+  "total": 1
+}
+```
+
+**Alle Ciphers:**
+```bash
+$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=all"
+
+{
+  "items": [
+    {
+      "input": "Test",
+      "ciphers": [
+        {"name": "ordinal", "code": "or", "value": 1},
+        {"name": "reverse_ordinal", "code": "ro", "value": 8},
+        {"name": "pythagorean", "code": "py", "value": 1},
+        ... (alle 11 Ciphers)
+      ]
+    }
+  ],
+  "total": 1
+}
+```
+
+**Mit Debug-Chains:**
+```bash
+$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=all&debug=true"
+
+{
+  "items": [
+    {
+      "input": "Test",
+      "ciphers": [
+        {
+          "name": "ordinal",
+          "code": "or",
+          "value": 1,
+          "chain": ["Test", "64", "10", "1"]
+        },
+        ...
+      ]
+    }
+  ],
+  "total": 1
 }
 ```
 
@@ -192,17 +317,17 @@ $ curl "http://localhost:3000/reduce?input=hello,world"
 Bedeutung einer einzelnen Zahl.
 
 **Parameter:**
-- `parts` (optional): `full`, `pos`, oder `neg`
+- `parts` (optional): `full`, `pos`, `neg`, `both` (legacy: `light`, `shadow`)
 
 **Beispiel:**
 ```bash
-$ curl "http://localhost:3000/lookup/7"
+$ curl "https://kern.drehraum.wtf/lookup/7?parts=full"
 
 {
   "number": 7,
-  "text": "Tiefe, Intuition, Analyse, Rückzug",
-  "positive": "Spirituelle Tiefe...",
-  "negative": "Isolation..."
+  "meaning": "Tiefe, Intuition, Analyse, Rückzug",
+  "positive": "Spirituelle Tiefe, analytisches Denken...",
+  "negative": "Isolation, Misstrauen..."
 }
 ```
 
@@ -212,17 +337,24 @@ Bedeutungen mehrerer Zahlen.
 
 **Parameter:**
 - `numbers` (erforderlich): Kommagetrennte Zahlen
-- `parts` (optional): `full`, `pos`, oder `neg`
+- `parts` (optional): `full`, `pos`, `neg`, `both`
 
 **Beispiel:**
 ```bash
-$ curl "http://localhost:3000/lookup?numbers=1,5,7"
+$ curl "https://kern.drehraum.wtf/lookup?numbers=1,7,11&parts=full"
 
-[
-  {"number": 1, "text": "Ursprung, Wille, Individualität..."},
-  {"number": 5, "text": "Veränderung, Freiheit, Abenteuer..."},
-  {"number": 7, "text": "Tiefe, Intuition, Analyse..."}
-]
+{
+  "items": [
+    {
+      "number": 1,
+      "meaning": "Ursprung, Wille, Individualität",
+      "positive": "...",
+      "negative": "..."
+    },
+    {"number": 7, "meaning": "...", "positive": "...", "negative": "..."},
+    {"number": 11, "meaning": "...", "positive": "...", "negative": "..."}
+  ]
+}
 ```
 
 #### `GET /date`
@@ -235,12 +367,18 @@ Reduziert einen Datums-Bereich.
 
 **Beispiel:**
 ```bash
-$ curl "http://localhost:3000/date?range=-2..2"
+$ curl "https://kern.drehraum.wtf/date?range=0..3&debug=true"
 
 {
   "dates": [
-    {"offset": -2, "date": "24.11.2025", "value": 9},
-    {"offset": 0, "date": "26.11.2025", "value": 2}
+    {
+      "offset": 0,
+      "date": "26.11.2025",
+      "value": 2,
+      "meaning": "Dualität, Beziehung, Harmonie",
+      "chain": ["26112025", "19", "10", "1"]
+    },
+    ...
   ]
 }
 ```
@@ -254,10 +392,10 @@ Generiert SPEKTRA-Analyseprompt mit allen 11 Chiffren.
 
 **Beispiel:**
 ```bash
-$ curl "http://localhost:3000/spektra?word=test"
+$ curl "https://kern.drehraum.wtf/spektra?word=Love"
 
 {
-  "prompt": "Du bist das SPEKTRA-Analysemodul.\n\n... [gefüllter Prompt mit allen Chiffren und Bedeutungen] ..."
+  "prompt": "Du bist das SPEKTRA-Analysemodul...\n[Vollständiger Prompt mit allen Chiffren und Bedeutungen]"
 }
 ```
 
@@ -281,4 +419,4 @@ $ curl "http://localhost:3000/spektra?word=test"
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 1.0.2
+**STATUS:** Stabil | **VERSION:** 1.1.0

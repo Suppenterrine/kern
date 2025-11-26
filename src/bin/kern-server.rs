@@ -12,10 +12,109 @@ use kern::core::{
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+
 #[derive(Clone)]
 struct AppState {
     map: Arc<HashMap<u32, Bedeutung>>,
 }
+
+// ============================================================================
+// Root Endpoint - API Overview
+// ============================================================================
+
+#[derive(Serialize)]
+struct EndpointInfo {
+    path: &'static str,
+    method: &'static str,
+    description: &'static str,
+}
+
+#[derive(Serialize)]
+struct ApiOverview {
+    name: &'static str,
+    version: &'static str,
+    endpoints: Vec<EndpointInfo>,
+    examples: HashMap<&'static str, &'static str>,
+}
+
+async fn root_handler() -> Json<ApiOverview> {
+    let mut examples = HashMap::new();
+    examples.insert("reduce_simple", "/reduce?input=Wickfeld");
+    examples.insert("reduce_debug", "/reduce?input=Wickfeld&debug=true");
+    examples.insert("reduce_multi", "/reduce?input=Test,Love,Life");
+    examples.insert("reduce_cipher", "/reduce?input=Test&cipher=ord,py");
+    examples.insert("reduce_all_ciphers", "/reduce?input=Test&cipher=all");
+    examples.insert("lookup_single", "/lookup/7?parts=full");
+    examples.insert("lookup_multi", "/lookup?numbers=1,7,11&parts=full");
+    examples.insert("date_range", "/date?range=0..7&debug=true");
+    examples.insert("spektra", "/spektra?word=Love");
+
+    Json(ApiOverview {
+        name: "KERN API",
+        version: VERSION,
+        endpoints: vec![
+            EndpointInfo {
+                path: "/",
+                method: "GET",
+                description: "API overview and documentation",
+            },
+            EndpointInfo {
+                path: "/version",
+                method: "GET",
+                description: "Version information",
+            },
+            EndpointInfo {
+                path: "/reduce",
+                method: "GET",
+                description: "Reduce text to numerology values (supports multiple inputs and ciphers)",
+            },
+            EndpointInfo {
+                path: "/lookup/:number",
+                method: "GET",
+                description: "Get meaning of a single number",
+            },
+            EndpointInfo {
+                path: "/lookup",
+                method: "GET",
+                description: "Get meanings of multiple numbers",
+            },
+            EndpointInfo {
+                path: "/date",
+                method: "GET",
+                description: "Analyze date range with numerology",
+            },
+            EndpointInfo {
+                path: "/spektra",
+                method: "GET",
+                description: "Multi-cipher spectral analysis for LLM prompt generation",
+            },
+        ],
+        examples,
+    })
+}
+
+// ============================================================================
+// Version Endpoint
+// ============================================================================
+
+#[derive(Serialize)]
+struct VersionResponse {
+    name: &'static str,
+    version: &'static str,
+}
+
+async fn version_handler() -> Json<VersionResponse> {
+    Json(VersionResponse {
+        name: PKG_NAME,
+        version: VERSION,
+    })
+}
+
+// ============================================================================
+// Reduce Endpoint - WITH Multi-Cipher Support
+// ============================================================================
 
 #[derive(Deserialize)]
 struct ReduceParams {
@@ -26,22 +125,36 @@ struct ReduceParams {
     length: bool,
     #[serde(rename = "onlyTotal", default)]
     only_total: bool,
+    cipher: Option<String>, // NEW: comma-separated cipher codes or "all"
 }
 
 #[derive(Serialize)]
-struct ReduceItem {
+struct CipherResult {
+    name: String,
+    code: String,
     value: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    length: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chain: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
+struct ReduceItem {
+    input: String, // NEW: Always include input text
+    #[serde(skip_serializing_if = "Option::is_none")]
+    length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ciphers: Option<Vec<CipherResult>>, // NEW: Multi-cipher results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<u32>, // Legacy: single value (when no cipher param)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>, // Legacy: single chain (when no cipher param)
+}
+
+#[derive(Serialize)]
 struct ReduceResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
-    items: Option<Vec<ReduceItem>>, // jede Eingabe mit Wert
-    total: u32, // Gesamtsumme reduziert
+    items: Option<Vec<ReduceItem>>,
+    total: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_chain: Option<Vec<String>>,
 }
@@ -49,16 +162,6 @@ struct ReduceResponse {
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
-}
-
-#[derive(Deserialize)]
-struct SpektraParams {
-    word: Option<String>,
-}
-
-#[derive(Serialize)]
-struct SpektraResponse {
-    prompt: String,
 }
 
 async fn reduce_handler(
@@ -77,7 +180,7 @@ async fn reduce_handler(
             )
         })?;
 
-    // Eingaben per Komma trennen
+    // Parse inputs (comma-separated)
     let inputs: Vec<&str> = input
         .split(',')
         .map(|s| s.trim())
@@ -93,26 +196,120 @@ async fn reduce_handler(
         ));
     }
 
+    // Parse cipher parameter
+    let use_multi_cipher = params.cipher.is_some();
+    let cipher_codes = if let Some(ref cipher_param) = params.cipher {
+        let cipher_param = cipher_param.trim();
+        if cipher_param == "all" {
+            // Use all available ciphers
+            descriptors()
+                .iter()
+                .map(|d| d.short.to_string())
+                .collect()
+        } else {
+            // Parse comma-separated cipher codes
+            cipher_param
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
+    } else {
+        vec![] // Empty if no cipher param (use default behavior)
+    };
+
+    // Validate cipher codes if provided
+    if use_multi_cipher && cipher_codes.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "cipher parameter provided but no valid cipher codes found".into(),
+            }),
+        ));
+    }
+
+    // Build cipher instances if using multi-cipher mode
+    let ciphers: Vec<Box<dyn Cipher>> = if use_multi_cipher {
+        let all_descriptors = descriptors();
+        let mut result = Vec::new();
+        for code in &cipher_codes {
+            match all_descriptors.iter().find(|d| d.short.to_lowercase() == *code) {
+                Some(descriptor) => result.push((descriptor.factory)()),
+                None => {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: format!("unknown cipher code: {}", code),
+                        }),
+                    ));
+                }
+            }
+        }
+        result
+    } else {
+        vec![]
+    };
+
     let mut results = Vec::new();
     let mut items = Vec::new();
 
     for word in &inputs {
-        let (value, chain) = reduce_number_steps(word);
-        results.push(value);
-        if !params.only_total {
-            items.push(ReduceItem {
-                value,
-                length: if params.length {
-                    Some(word.chars().count())
-                } else {
-                    None
-                },
-                chain: if params.debug { Some(chain) } else { None },
-            });
+        if use_multi_cipher {
+            // Multi-cipher mode: calculate value for each cipher
+            let mut cipher_results = Vec::new();
+
+            for cipher in &ciphers {
+                let (value, chain) = reduce_number_steps_with_cipher(word, cipher.as_ref());
+                cipher_results.push(CipherResult {
+                    name: cipher.name().to_string(),
+                    code: descriptors()
+                        .iter()
+                        .find(|d| d.name == cipher.name())
+                        .map(|d| d.short.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    value,
+                    chain: if params.debug { Some(chain) } else { None },
+                });
+            }
+
+            // Use first cipher's value for total calculation (or could sum all)
+            let first_value = cipher_results.first().map(|cr| cr.value).unwrap_or(0);
+            results.push(first_value);
+
+            if !params.only_total {
+                items.push(ReduceItem {
+                    input: word.to_string(),
+                    length: if params.length {
+                        Some(word.chars().count())
+                    } else {
+                        None
+                    },
+                    ciphers: Some(cipher_results),
+                    value: None,
+                    chain: None,
+                });
+            }
+        } else {
+            // Legacy single-cipher mode (default Ordinal)
+            let (value, chain) = reduce_number_steps(word);
+            results.push(value);
+            if !params.only_total {
+                items.push(ReduceItem {
+                    input: word.to_string(),
+                    length: if params.length {
+                        Some(word.chars().count())
+                    } else {
+                        None
+                    },
+                    ciphers: None,
+                    value: Some(value),
+                    chain: if params.debug { Some(chain) } else { None },
+                });
+            }
         }
     }
 
-    // Gesamtsumme berechnen
+    // Calculate total
     let sum: u32 = results.iter().sum();
     let (total, total_chain) = if params.debug {
         let (val, chain) = reduce_number_steps(&sum.to_string());
@@ -129,6 +326,42 @@ async fn reduce_handler(
 
     Ok(Json(response))
 }
+
+// Helper function to reduce with a specific cipher
+fn reduce_number_steps_with_cipher(s: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
+    let mut chain = Vec::new();
+    let mut current = s.to_string();
+    chain.push(current.clone());
+
+    // Calculate initial sum using cipher
+    let mut sum: u32 = current
+        .chars()
+        .filter_map(|ch| {
+            let val = cipher.char_to_value(ch);
+            if val > 0 { Some(val) } else { None }
+        })
+        .sum();
+
+    // Reduce until we hit a master number or single digit
+    loop {
+        if sum < 10 || sum == 11 || sum == 22 || sum == 33 {
+            break;
+        }
+        current = sum.to_string();
+        chain.push(current.clone());
+        sum = current.chars().filter_map(|c| c.to_digit(10)).sum();
+    }
+
+    if sum >= 10 {
+        chain.push(sum.to_string());
+    }
+
+    (sum, chain)
+}
+
+// ============================================================================
+// Lookup Endpoints
+// ============================================================================
 
 #[derive(Serialize)]
 struct LookupResponse {
@@ -237,6 +470,10 @@ async fn lookup_multi_handler(
     Json(LookupListResponse { items })
 }
 
+// ============================================================================
+// Date Endpoint
+// ============================================================================
+
 #[derive(Deserialize)]
 struct DateParams {
     range: String,
@@ -282,6 +519,20 @@ async fn date_handler(
         });
     }
     Ok(Json(DateResponse { dates }))
+}
+
+// ============================================================================
+// Spektra Endpoint
+// ============================================================================
+
+#[derive(Deserialize)]
+struct SpektraParams {
+    word: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SpektraResponse {
+    prompt: String,
 }
 
 async fn spektra_handler(
@@ -349,12 +600,18 @@ async fn spektra_handler(
     }
 }
 
+// ============================================================================
+// Main Server Setup
+// ============================================================================
+
 #[tokio::main]
 async fn main() {
     let map = load_bedeutungen();
     let state = AppState { map: Arc::new(map) };
 
     let app = Router::new()
+        .route("/", get(root_handler))
+        .route("/version", get(version_handler))
         .route("/reduce", get(reduce_handler))
         .route("/lookup", get(lookup_multi_handler))
         .route("/lookup/:number", get(lookup_handler))
@@ -363,7 +620,7 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("Listening on http://{addr}");
+    println!("KERN Server v{} listening on http://{}", VERSION, addr);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

@@ -1,0 +1,32 @@
+KERN v1.1.0 Release Notes
+
+API Improvements
+- Added /version endpoint showing name and version
+- Added / root endpoint with API overview and examples
+- /reduce now includes input text in response for proper mapping
+- /reduce now supports multi-cipher analysis via cipher parameter
+- Added cipher=all shorthand to use all 11 ciphers at once
+- Added cipher-specific codes (or, py, ch, etc.) for targeted analysis
+- Multi-cipher responses include name, code, value, and optional chain
+- Improved response structure for better client-side processing
+
+Server Enhancements
+- Server startup message now includes version number
+- Live API available at https://kern.drehraum.wtf
+- Docker image auto-deployed via Watchtower on releases
+
+Documentation
+- Updated README with comprehensive API examples
+- Added live API URL and Docker deployment instructions
+- Documented all cipher codes and multi-cipher usage patterns
+- Added examples for all new endpoint features
+
+Breaking Changes
+- /reduce response structure changed when using cipher parameter
+- Items now always include input field for proper text-to-value mapping
+- Multi-cipher mode returns ciphers array instead of single value field
+
+Migration Guide
+- Old: {"items":[{"value":1}],"total":1}
+- New: {"items":[{"input":"Test","value":1}],"total":1}
+- Multi-cipher: {"items":[{"input":"Test","ciphers":[...]}],"total":1}
