@@ -237,3 +237,43 @@ pub fn group_results_by_input<'a>(
 
     grouped
 }
+
+// ============================================================================
+// SPEKTRA OUTPUT
+// ============================================================================
+
+/// Format and output SPEKTRA analysis prompt
+/// Displays full prompt, copies to clipboard, shows confirmation
+pub fn format_spektra_output(prompt: &str) {
+    // Display full prompt
+    println!("{}", prompt);
+    println!();
+    
+    // Try to copy to clipboard
+    match arboard::Clipboard::new() {
+        Ok(mut clipboard) => {
+            match clipboard.set_text(prompt.to_string()) {
+                Ok(_) => {
+                    // Show confirmation message with first few words
+                    let first_words: String = prompt
+                        .lines()
+                        .next()
+                        .unwrap_or(prompt)
+                        .split_whitespace()
+                        .take(5)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    
+                    println!();
+                    println!("{} [{}... → In Zwischenablage kopiert]", SYMBOL_POSITIVE, first_words);
+                }
+                Err(_) => {
+                    // Silently ignore clipboard copy failures
+                }
+            }
+        }
+        Err(_) => {
+            // Silently ignore clipboard access failures (e.g., headless systems)
+        }
+    }
+}

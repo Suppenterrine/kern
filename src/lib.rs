@@ -28,6 +28,9 @@ pub mod core {
     #[path = "../core/flow.rs"]
     pub mod flow;
 
+    #[path = "../core/spektra.rs"]
+    pub mod spektra;
+
     pub use flow::{FlowContext, FlowFlags, Pipeline};
 
     pub use ciphers::{

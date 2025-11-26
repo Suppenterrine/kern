@@ -6,7 +6,8 @@ use axum::{
 };
 use chrono::{Duration, Local};
 use kern::core::{
-    Bedeutung, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
+    Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
+    descriptors, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -48,6 +49,16 @@ struct ReduceResponse {
 #[derive(Serialize)]
 struct ErrorResponse {
     error: String,
+}
+
+#[derive(Deserialize)]
+struct SpektraParams {
+    word: Option<String>,
+}
+
+#[derive(Serialize)]
+struct SpektraResponse {
+    prompt: String,
 }
 
 async fn reduce_handler(
@@ -273,6 +284,71 @@ async fn date_handler(
     Ok(Json(DateResponse { dates }))
 }
 
+async fn spektra_handler(
+    Query(params): Query<SpektraParams>,
+    State(state): State<AppState>,
+) -> Result<Json<SpektraResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let word = params
+        .word
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "word parameter missing".into(),
+                }),
+            )
+        })?;
+
+    // Force all ciphers for spektra
+    let mut spektra_ciphers: Vec<Box<dyn Cipher>> = Vec::new();
+    for descriptor in descriptors() {
+        spektra_ciphers.push((descriptor.factory)());
+    }
+
+    let cipher_names: Vec<String> = spektra_ciphers
+        .iter()
+        .map(|cipher| cipher.name().to_string())
+        .collect();
+
+    // Build and execute pipeline
+    let mut pipeline = Pipeline::new();
+    let step = Step::new(0, 0, Operation::Reduce);
+    pipeline.add_step(step);
+
+    // Add lookup for meanings
+    let lookup_step = Step::new(0, 0, Operation::Lookup);
+    pipeline.add_step(lookup_step);
+
+    let mut ctx = FlowContext::new(FlowFlags {
+        verbose: false,
+        ciphers: cipher_names,
+        total: false,
+    });
+
+    let _result_set = pipeline.run(&mut ctx, &[word.clone()], &spektra_ciphers);
+
+    // Collect results from memory (all reduce operations)
+    let reduce_results: Vec<KernResult> = ctx
+        .memory
+        .iter()
+        .filter(|res| matches!(res.step.operation, Operation::Reduce))
+        .cloned()
+        .collect();
+
+    // Build spektra prompt
+    match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &state.map) {
+        Ok(prompt) => Ok(Json(SpektraResponse { prompt })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: format!("Error building spektra prompt: {}", e),
+            }),
+        )),
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let map = load_bedeutungen();
@@ -283,6 +359,7 @@ async fn main() {
         .route("/lookup", get(lookup_multi_handler))
         .route("/lookup/:number", get(lookup_handler))
         .route("/date", get(date_handler))
+        .route("/spektra", get(spektra_handler))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

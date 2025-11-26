@@ -94,6 +94,12 @@ fn main() {
                 .help("Show detailed calculation trace"),
         )
         .arg(
+            Arg::new("spektra")
+                .long("spektra")
+                .action(ArgAction::SetTrue)
+                .help("Generate SPEKTRA analysis prompt (uses all ciphers automatically)"),
+        )
+        .arg(
             Arg::new("ARGS")
                 .num_args(1..)
                 .allow_hyphen_values(true)
@@ -108,6 +114,7 @@ fn main() {
     let show_pos = matches.get_flag("pos");
     let show_neg = matches.get_flag("neg");
     let show_full = matches.get_flag("full");
+    let show_spektra = matches.get_flag("spektra");
 
     if matches.get_flag("list-ciphers") {
         let cipher_list: Vec<(String, String, String)> = descriptors()
@@ -290,6 +297,72 @@ fn main() {
             Err(e) => eprintln!("{e}"),
         }
         return; // Date processing complete, exit early
+    }
+
+    /* --spektra Flag gesetzt? -------------------------------------------- */
+
+    if show_spektra {
+        if let Some(args_values) = matches.get_many::<String>("ARGS") {
+            let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
+            
+            if raw_tokens.is_empty() {
+                eprintln!("--spektra requires a word argument");
+                return;
+            }
+
+            // Only use the first word for spektra analysis
+            let word = &raw_tokens[0];
+
+            // Force all ciphers for spektra
+            let mut spektra_ciphers: Vec<Box<dyn Cipher>> = Vec::new();
+            for descriptor in descriptors() {
+                spektra_ciphers.push((descriptor.factory)());
+            }
+
+            let cipher_names: Vec<String> = spektra_ciphers
+                .iter()
+                .map(|cipher| cipher.name().to_string())
+                .collect();
+
+            // Build and execute pipeline
+            let mut pipeline = Pipeline::new();
+            let step = Step::new(0, 0, Operation::Reduce);
+            pipeline.add_step(step);
+            
+            // Add lookup for meanings
+            let lookup_step = Step::new(0, 0, Operation::Lookup);
+            pipeline.add_step(lookup_step);
+
+            let mut ctx = FlowContext::new(FlowFlags {
+                verbose: debug,
+                ciphers: cipher_names,
+                total: false,
+            });
+
+            let _result_set = pipeline.run(&mut ctx, &[word.clone()], &spektra_ciphers);
+
+            // Collect results from memory (all reduce operations)
+            let reduce_results: Vec<KernResult> = ctx
+                .memory
+                .iter()
+                .filter(|res| matches!(res.step.operation, Operation::Reduce))
+                .cloned()
+                .collect();
+
+            // Load meanings
+            let bedeutungen = load_bedeutungen();
+
+            // Build spektra prompt
+            match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &bedeutungen) {
+                Ok(prompt) => {
+                    ui::output::format_spektra_output(&prompt);
+                }
+                Err(e) => {
+                    eprintln!("Error building spektra prompt: {}", e);
+                }
+            }
+        }
+        return;
     }
 
     /* --length Flag gesetzt? -------------------------------------------- */
