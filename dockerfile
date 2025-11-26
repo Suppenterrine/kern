@@ -9,9 +9,11 @@ RUN apt-get update && \
       pkg-config libssl-dev perl make build-essential ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# 2) Copy source & Cargo cache
+# 2) Copy workspace manifests for dependency caching
 COPY Cargo.toml Cargo.lock ./
+COPY xtask/Cargo.toml ./xtask/
 RUN mkdir src && echo "// dummy" > src/lib.rs \
+    && mkdir -p xtask/src && echo "fn main() {}" > xtask/src/main.rs \
     && cargo fetch
 
 COPY . .
