@@ -1,3 +1,6 @@
+[workspace]
+members = ["xtask"]
+
 [package]
 name = "kern"
 version = "0.3.1"
