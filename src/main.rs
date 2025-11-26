@@ -1,13 +1,13 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepFlags,
+    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
     default_cipher, descriptors, get_cipher, load_bedeutungen, parse_range,
 };
 use kern::ui;
 use serde::Deserialize;
 use serde_json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION");
@@ -156,7 +156,7 @@ fn main() {
     if selected_ciphers.is_empty() {
         selected_ciphers.push(default_cipher());
     }
-    let mut cipher_labels: Vec<String> = selected_ciphers
+    let cipher_labels: Vec<String> = selected_ciphers
         .iter()
         .map(|cipher| cipher.name().to_string())
         .collect();
@@ -388,10 +388,8 @@ fn main() {
         let args = parsed.inputs;
         let reduce_steps = parsed.steps;
 
-        // Save original global cipher names before adding local ciphers
+        // All global cipher names apply uniformly
         let global_cipher_names = cipher_labels.clone();
-
-        ensure_local_ciphers(&mut selected_ciphers, &mut cipher_labels, &reduce_steps);
 
         let mut pipeline = Pipeline::new();
         for step in reduce_steps.into_iter() {
@@ -581,35 +579,6 @@ fn build_cipher_alias_map(cipher_labels: &[String]) -> HashMap<String, String> {
     map
 }
 
-fn ensure_local_ciphers(
-    selected_ciphers: &mut Vec<Box<dyn Cipher>>,
-    cipher_labels: &mut Vec<String>,
-    steps: &[Step],
-) {
-    let mut existing: HashSet<String> = selected_ciphers
-        .iter()
-        .map(|cipher| cipher.name().to_lowercase())
-        .collect();
-
-    for step in steps {
-        if let Some(names) = &step.local_flags.ciphers {
-            for name in names {
-                let key = name.to_lowercase();
-                if existing.contains(&key) {
-                    continue;
-                }
-
-                if let Some(cipher) = get_cipher(&key) {
-                    let canonical = cipher.name().to_string();
-                    existing.insert(canonical.to_lowercase());
-                    cipher_labels.push(canonical.clone());
-                    selected_ciphers.push(cipher);
-                }
-            }
-        }
-    }
-}
-
 struct ParsedPipeline {
     inputs: Vec<String>,
     steps: Vec<Step>,
@@ -617,62 +586,21 @@ struct ParsedPipeline {
     saw_lookup: bool,
 }
 
+/// Parse tokens into a list of input strings and steps.
+/// All inputs are treated equally - no per-input flags.
+/// Only global flags (--total, --lookup) are supported inline.
 fn parse_pipeline_tokens(
     tokens: &[String],
-    cipher_aliases: &HashMap<String, String>,
+    _cipher_aliases: &HashMap<String, String>,
 ) -> Result<ParsedPipeline, String> {
     let mut inputs = Vec::new();
     let mut steps = Vec::new();
-    let mut current_input: Option<String> = None;
-    let mut current_flags = StepFlags::default();
-    let mut iter = tokens.iter();
     let mut saw_total = false;
     let mut saw_lookup = false;
 
-    while let Some(token) = iter.next() {
+    // Simple input parsing: collect inputs and recognize inline flags
+    for token in tokens {
         match token.as_str() {
-            "-v" => {
-                if current_input.is_none() {
-                    return Err(String::from(
-                        "Lokales Flag -v muss nach einem Input angegeben werden.",
-                    ));
-                }
-                current_flags.verbose = Some(true);
-            }
-            "-c" => {
-                if current_input.is_none() {
-                    return Err(String::from(
-                        "Lokales Flag -c muss nach einem Input angegeben werden.",
-                    ));
-                }
-                let names_token = iter.next().ok_or_else(|| {
-                    String::from("Nach -c wird eine kommagetrennte Cipher-Liste erwartet.")
-                })?;
-                let mut resolved = Vec::new();
-                for raw in names_token.split(',') {
-                    let trimmed = raw.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    let key = trimmed.to_lowercase();
-                    if let Some(canonical) = cipher_aliases.get(&key) {
-                        if !resolved
-                            .iter()
-                            .any(|existing: &String| existing.eq_ignore_ascii_case(canonical))
-                        {
-                            resolved.push(canonical.clone());
-                        }
-                    } else {
-                        return Err(format!("Unbekanntes Cipher für -c: {trimmed}"));
-                    }
-                }
-                if resolved.is_empty() {
-                    return Err(String::from(
-                        "Nach -c wurde kein gültiges Cipher angegeben.",
-                    ));
-                }
-                current_flags.ciphers = Some(resolved);
-            }
             "-t" | "--total" => {
                 saw_total = true;
             }
@@ -680,24 +608,15 @@ fn parse_pipeline_tokens(
                 saw_lookup = true;
             }
             _ => {
-                if let Some(input) = current_input.take() {
-                    let pipe_index = inputs.len();
-                    inputs.push(input);
-                    let mut step = Step::new(pipe_index, 0, Operation::Reduce);
-                    step.local_flags = current_flags.clone();
-                    steps.push(step);
-                    current_flags = StepFlags::default();
-                }
-                current_input = Some(token.clone());
+                // Treat as input
+                inputs.push(token.clone());
             }
         }
     }
 
-    if let Some(input) = current_input.take() {
-        let pipe_index = inputs.len();
-        inputs.push(input);
-        let mut step = Step::new(pipe_index, 0, Operation::Reduce);
-        step.local_flags = current_flags.clone();
+    // Create a reduce step for each input
+    for (idx, _input) in inputs.iter().enumerate() {
+        let step = Step::new(idx, 0, Operation::Reduce);
         steps.push(step);
     }
 

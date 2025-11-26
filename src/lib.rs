@@ -62,18 +62,11 @@ pub mod core {
         }
     }
 
-    #[derive(Debug, Clone, Default, Serialize)]
-    pub struct StepFlags {
-        pub verbose: Option<bool>,
-        pub ciphers: Option<Vec<String>>,
-    }
-
     #[derive(Debug, Clone, Serialize)]
     pub struct Step {
         pub pipe_index: usize,
         pub cipher_index: usize,
         pub operation: Operation,
-        pub local_flags: StepFlags,
     }
 
     impl Step {
@@ -82,13 +75,7 @@ pub mod core {
                 pipe_index,
                 cipher_index,
                 operation,
-                local_flags: StepFlags::default(),
             }
-        }
-
-        pub fn with_flags(mut self, flags: StepFlags) -> Self {
-            self.local_flags = flags;
-            self
         }
     }
 
