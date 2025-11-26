@@ -281,4 +281,4 @@ $ curl "http://localhost:3000/spektra?word=test"
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 1.0.1
+**STATUS:** Stabil | **VERSION:** 1.0.2
