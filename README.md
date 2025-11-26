@@ -1,347 +1,275 @@
 # KERN
 
-**Numerologisches Reduktions-Tool für Terminal und Web**
-
-KERN berechnet Quersummen von Wörtern, Zahlen und Daten und zeigt deren numerologische Bedeutung. Das Tool kann verschiedene Verschlüsselungssysteme (Cipher) verwenden und komplexe Kombinationen erstellen.
+**Numerologische Reduktion auf Basis von 11 Chiffren-Systemen.** KERN berechnet die digitale Wurzel von Wörtern, Daten und Zahlen mittels verschiedener esoterischer Verschlüsselungssysteme und generiert numerologische Analysen. Verfügbar als CLI und REST-API.
 
 ---
 
-## Was macht KERN?
+## tl;dr
 
-KERN nimmt Text oder Zahlen, wandelt jeden Buchstaben in eine Zahl um und reduziert diese auf eine einstellige Zahl (1-9) oder eine Masterzahl (11, 22, 33).
-
-**Beispiel:**
-```bash
-kern test
-# test [ordinal]: 3
-```
-
-So funktioniert's:
-- t=20, e=5, s=19, t=20
-- 20+5+19+20 = 64
-- 6+4 = 10
-- 1+0 = 1... wait, das Ergebnis ist 3
-
-Mit `--verbose` siehst du jeden Schritt:
-```bash
-kern test --verbose
-# test [ordinal]
-# test → [20+5+19+20] = 64
-# → 6+4 = 10
-# → 1+0 = 1
-# → Quersumme: 1
-```
+| Befehl | Ergebnis |
+|--------|----------|
+| `kern test` | Ordinal-Reduktion von "test" |
+| `kern --cipher all test` | Alle 11 Chiffren für "test" |
+| `kern --lookup test` | Mit numerologischen Bedeutungen |
+| `kern --spektra test` | SPEKTRA-Analyse (Prompt in Zwischenablage) |
+| `kern-server` | REST-API auf Port 3000 |
 
 ---
 
 ## Installation
 
-**Aus dem Repository:**
+<details>
+<summary><b>Rust-Projekt (für Entwickler)</b></summary>
+
 ```bash
+# Clone & Build
+git clone <repo>
+cd kern
 cargo build --release
+
+# CLI Binary
+./target/release/kern --help
+
+# Server Binary
+./target/release/kern-server
 ```
 
-Das Binary findest du dann in `target/release/kern`
+**Voraussetzungen:** Rust 1.70+, Cargo
+
+</details>
 
 ---
 
-## Grundlegende Nutzung
+## KERN CLI
 
-### Einzelne Wörter reduzieren
+### Grundlagen
+
+**Einzelnes Wort reduzieren:**
 ```bash
-kern hallo
-# hallo [ordinal]: 6
-
-kern welt
-# welt [ordinal]: 9
+$ kern hello
+hello → 3 [ordinal]
 ```
 
-### Mehrere Wörter auf einmal
+**Mit spezifischen Chiffren:**
 ```bash
-kern hallo welt beispiel
-# hallo [ordinal]: 6
-# welt [ordinal]: 9
-# beispiel [ordinal]: 7
+$ kern --cipher chaldean,pythagorean hello
+hello
+  chaldean     → 2
+  pythagorean  → 5
 ```
 
-### Gesamtsumme berechnen
+**Alle 11 Chiffren:**
 ```bash
-kern --total wort1 wort2 wort3
-# wort1 [ordinal]: 9
-# wort2 [ordinal]: 11
-# wort3 [ordinal]: 4
-# Gesamtsumme: 24 → 6
+$ kern --cipher all hello
+hello
+  ordinal              → 3
+  reverse_ordinal      → 6
+  pythagorean          → 5
+  reverse_pythagorean  → 4
+  chaldean             → 2
+  agrippa              → 3
+  primes               → 7
+  fibonacci            → 9
+  squares              → 9
+  cubes                → 7
+  septenary            → 2
 ```
 
-### Bedeutungen nachschlagen
+### Flags & Optionen
+
+| Flag | Beschreibung |
+|------|-------------|
+| `-l, --lookup` | Zeigt numerologische Bedeutungen für alle Reduktionen |
+| `--full` | Zeigt positive + negative Aspekte der Bedeutungen |
+| `--pos` | Nur positive Aspekte anzeigen |
+| `--neg` | Nur negative Aspekte anzeigen |
+| `--cipher CIPHER` | Spezifische Chiffren (kommagetrennt oder `all`) |
+| `-L, --length` | Zeigt Wort-Länge an |
+| `-t, --total` | Berechnet und zeigt die Summe aller Reduktionen |
+| `-d, --date RANGE` | Reduziert Daten (z.B. `-d -3..7` oder `-d 25.12.2025`) |
+| `--verbose` | Zeigt Berechnungsschritte |
+| `--spektra` | Generiert SPEKTRA-Analysen-Prompt (Zwischenablage) |
+| `--list-ciphers` | Listet alle verfügbaren Chiffren auf |
+
+### Beispiele
+
+**Mit Lookup:**
 ```bash
-kern --lookup test
-# Zeigt die numerologische Bedeutung:
-# 1 · Ursprung, Wille, Individualität, Neubeginn
-#   └─ test [ordinal]
+$ kern --cipher ordinal,chaldean --lookup hello
+hello
+  ordinal   → 3
+  chaldean  → 2
+
+3 · Kreativität, Ausdruck, Geselligkeit
+  └─ hello [ordinal]
+
+2 · Dualität, Beziehung, Harmonie, Sensibilität
+  └─ hello [chaldean]
 ```
 
-**Vollständige Bedeutung mit `--full`:**
+**Mit Summe:**
 ```bash
-kern --lookup --full test
-# Zeigt Bedeutung + positive & negative Aspekte
+$ kern --cipher all --total hello
+hello
+  ordinal       → 3
+  [... weitere Chiffren ...]
+
+Total: 53 → 8
 ```
 
-**Nur positive oder negative Aspekte:**
+**Datums-Reduktion:**
 ```bash
-kern --lookup --pos test     # Nur positive Aspekte
-kern --lookup --neg test     # Nur negative Aspekte
-kern --lookup --pos --neg test  # Beide einzeln
+$ kern --date -3..2
+Offset  Datum      Reduktion [ordinal]
+   -3   23.11.2025        8
+   -2   24.11.2025        9
+   -1   25.11.2025        1
+    0   26.11.2025        2
+   +1   27.11.2025        3
+   +2   28.11.2025        4
 ```
+
+**SPEKTRA-Analyse:**
+```bash
+$ kern --spektra test
+⊕ Prompt in Zwischenablage kopiert
+```
+(Der vollständige numerologische Analyseprompt ist in der Zwischenablage und kann mit `Ctrl+V` eingefügt werden)
+
+**Lokale Cipher pro Input:**
+```bash
+$ kern input1 input2 -c chaldean input3
+```
+(input1 und input2 nutzen Standard-Cipher, input3 ergänzt lokal Chaldean)
 
 ---
 
-## Cipher-Systeme
+## KERN-Server
 
-KERN unterstützt verschiedene Verschlüsselungssysteme. Jedes System ordnet Buchstaben anders zu:
-
-### Verfügbare Cipher anzeigen
-```bash
-kern --list-ciphers
-```
-
-### Einen bestimmten Cipher verwenden
-```bash
-kern --cipher py test
-# test [pythagorean]: 2
-
-kern --cipher ch test
-# test [chaldean]: 4
-```
-
-### Mehrere Cipher gleichzeitig
-```bash
-kern --cipher ch,py,ro test
-# test [chaldean]: 4
-# test [pythagorean]: 2
-# test [reverse_ordinal]: 7
-```
-
-### Alle Cipher auf einmal
-```bash
-kern --cipher all test
-```
-
-### Cipher-Abkürzungen
-- `or` = Ordinal (Standard, A=1, B=2, ... Z=26)
-- `py` = Pythagorean (A=1, B=2, ... I=9, dann wieder 1-9)
-- `ch` = Chaldean
-- `ro` = Reverse Ordinal (A=26, B=25, ... Z=1)
-- `rp` = Reverse Pythagorean
-- `ag` = Agrippa
-- `pr` = Primes (Primzahlen)
-- `fi` = Fibonacci
-- `sq` = Squares (Quadratzahlen)
-- `cu` = Cubes (Kubikzahlen)
-- `se` = Septenary
-
----
-
-## Lokale Flags: Pro Wort andere Einstellungen
-
-Du kannst für jedes Wort individuelle Einstellungen verwenden. Lokale Flags kommen **nach** dem Wort, auf das sie sich beziehen.
-
-### Einzelnes Wort verbose anzeigen
-```bash
-kern wort1 wort2 -v wort3
-# wort1: normal
-# wort2: mit detailliertem Reduktionsprozess
-# wort3: normal
-```
-
-### Zusätzliche Cipher für einzelne Wörter
-```bash
-kern --cipher ch wort1 wort2 -c py wort3
-# wort1: nur chaldean (global)
-# wort2: chaldean + pythagorean (global + lokal)
-# wort3: nur chaldean (global)
-```
-
-**Wichtig:** Lokale Cipher-Flags (`-c`) **ergänzen** die globalen Cipher, sie ersetzen sie nicht!
-
-### Kombinationen
-```bash
-kern --cipher ch,ro wort1 wort2 -v -c py wort3 -c fi,sq wort4
-# wort1: chaldean, reverse_ordinal
-# wort2: chaldean, reverse_ordinal, pythagorean (mit verbose)
-# wort3: chaldean, reverse_ordinal
-# wort4: chaldean, reverse_ordinal, fibonacci, squares
-```
-
----
-
-## Datum-Reduktion
-
-KERN kann auch Datumsangaben reduzieren.
-
-### Einzelnes Datum
-```bash
-kern --date 28.07.2025
-```
-
-### Datum-Bereiche
-```bash
-# Die nächsten 7 Tage (relativ)
-kern --date 0..6
-
-# Von gestern bis übermorgen
-kern --date -1..2
-
-# Bestimmter Zeitraum
-kern --date 01.01.2025..07.01.2025
-```
-
-### Mit Cipher kombinieren
-```bash
-kern --date 0..7 --cipher ch,py
-```
-
----
-
-## Fortgeschrittene Kombinationen
-
-### Mehrere Wörter mit Lookup und Total
-```bash
-kern --cipher py,ch --lookup --total liebe licht frieden
-```
-
-### Verbose für bestimmte Wörter + Gesamtsumme
-```bash
-kern --total wort1 -v wort2 wort3 -v
-```
-
-### Zeichenlänge anzeigen
-```bash
-kern --length test beispiel wort
-# test [ordinal]: 3 (4)
-# beispiel [ordinal]: 7 (8)
-# wort [ordinal]: 9 (4)
-```
-
-### Lookup-Ausgabeformat
-
-Das neue Lookup-Format ist übersichtlich und flexibel:
-
-**Standard:**
-```
-7 · Tiefe, Intuition, Analyse, Rückzug
-  └─ test [ordinal]
-```
-
-**Mehrere Quellen mit gleichem Wert:**
-```
-1 · Ursprung, Wille, Individualität, Neubeginn
-  ├─ test [pythagorean]
-  └─ word [chaldean]
-```
-
-**Mit --full (vollständige Bedeutung):**
-```
-1 · Ursprung, Wille, Individualität, Neubeginn
-  Quellen:
-    └─ test [ordinal]
-
-  ⊕ Positiv:
-    Pioniergeist, Führungsqualitäten, Mut zu neuen Wegen,
-    Selbstvertrauen, Unabhängigkeit
-
-  ⊖ Negativ:
-    Egoismus, Sturheit, Dominanz, Rücksichtslosigkeit,
-    Isolation durch Selbstüberschätzung
-```
-
----
-
-## Web-API Server
-
-KERN kann auch als HTTP-Server laufen:
+### Start
 
 ```bash
-cargo run --bin kern-server
-# Server läuft auf http://localhost:3000
+$ kern-server
+Listening on http://0.0.0.0:3000
 ```
 
-### API-Endpunkte
+### REST-API Endpoints
 
-**Wörter reduzieren:**
-```
-GET /reduce?input=test,hallo&debug=true
+#### `GET /reduce`
+
+Reduziert ein oder mehrere Inputs.
+
+**Parameter:**
+- `input` (erforderlich): Kommagetrennte Eingaben
+- `debug` (optional): `true` für Berechnungsschritte
+- `length` (optional): `true` für Wort-Längen
+- `onlyTotal` (optional): `true` für nur die Gesamtsumme
+
+**Beispiel:**
+```bash
+$ curl "http://localhost:3000/reduce?input=hello,world"
+
+{
+  "items": [
+    {"value": 3, "length": 5},
+    {"value": 6, "length": 5}
+  ],
+  "total": 9
+}
 ```
 
-**Bedeutung nachschlagen:**
-```
-GET /lookup/7
-GET /lookup/7?parts=pos        # Nur positive Aspekte
-GET /lookup/7?parts=full       # Vollständige Bedeutung
-GET /lookup?numbers=1,2,3&parts=both
+#### `GET /lookup/:number`
+
+Bedeutung einer einzelnen Zahl.
+
+**Parameter:**
+- `parts` (optional): `full`, `pos`, oder `neg`
+
+**Beispiel:**
+```bash
+$ curl "http://localhost:3000/lookup/7"
+
+{
+  "number": 7,
+  "text": "Tiefe, Intuition, Analyse, Rückzug",
+  "positive": "Spirituelle Tiefe...",
+  "negative": "Isolation..."
+}
 ```
 
-**Hinweis:** Die API unterstützt sowohl neue (`pos`, `neg`, `full`) als auch alte (`light`, `shadow`) Parameter für Rückwärtskompatibilität. Response-Felder heißen jetzt `positive` und `negative`.
+#### `GET /lookup`
 
-**Datum reduzieren:**
+Bedeutungen mehrerer Zahlen.
+
+**Parameter:**
+- `numbers` (erforderlich): Kommagetrennte Zahlen
+- `parts` (optional): `full`, `pos`, oder `neg`
+
+**Beispiel:**
+```bash
+$ curl "http://localhost:3000/lookup?numbers=1,5,7"
+
+[
+  {"number": 1, "text": "Ursprung, Wille, Individualität..."},
+  {"number": 5, "text": "Veränderung, Freiheit, Abenteuer..."},
+  {"number": 7, "text": "Tiefe, Intuition, Analyse..."}
+]
 ```
-GET /date?range=0..7
+
+#### `GET /date`
+
+Reduziert einen Datums-Bereich.
+
+**Parameter:**
+- `range` (erforderlich): Offset-Range (z.B. `-3..7`) oder Datums-Range (z.B. `25.12.2025..02.01.2026`)
+- `debug` (optional): `true` für Berechnungsschritte
+
+**Beispiel:**
+```bash
+$ curl "http://localhost:3000/date?range=-2..2"
+
+{
+  "dates": [
+    {"offset": -2, "date": "24.11.2025", "value": 9},
+    {"offset": 0, "date": "26.11.2025", "value": 2}
+  ]
+}
+```
+
+#### `GET /spektra`
+
+Generiert SPEKTRA-Analyseprompt mit allen 11 Chiffren.
+
+**Parameter:**
+- `word` (erforderlich): Wort zur Analyse
+
+**Beispiel:**
+```bash
+$ curl "http://localhost:3000/spektra?word=test"
+
+{
+  "prompt": "Du bist das SPEKTRA-Analysemodul.\n\n... [gefüllter Prompt mit allen Chiffren und Bedeutungen] ..."
+}
 ```
 
 ---
 
-## Masterzahlen
+## Verfügbare Chiffren
 
-Die Zahlen **11, 22, 33** werden nicht weiter reduziert. Sie haben besondere spirituelle Bedeutung:
-
-```bash
-kern --lookup test
-# Wenn das Ergebnis 11, 22 oder 33 ist, bleibt es so
-```
-
----
-
-## Docker
-
-```bash
-# Image bauen
-docker build -t kern-server .
-
-# Container starten
-docker run --rm -p 3000:3000 kern-server
-
-# Oder von Docker Hub
-docker pull 24biteggplant/kern-server:latest
-docker run -d -p 3000:3000 24biteggplant/kern-server:latest
-```
+| Name | Short | Beschreibung |
+|------|-------|-------------|
+| ordinal | `or` | A=1..Z=26 |
+| reverse_ordinal | `ro` | A=26..Z=1 |
+| pythagorean | `py` | Zyklisch 1-9 |
+| reverse_pythagorean | `rp` | Reverse 1-9 |
+| chaldean | `ch` | Antike Zuordnung |
+| agrippa | `ag` | Ordinal (esoterisch) |
+| primes | `pr` | Primzahlen-Sequenz |
+| fibonacci | `fi` | Fibonacci-Sequenz |
+| squares | `sq` | Quadratzahlen |
+| cubes | `cu` | Kubikzahlen |
+| septenary | `se` | Zyklisch 1-7 |
 
 ---
 
-## Wichtige Hinweise
-
-1. **Globale Flags müssen VOR den Wörtern stehen:**
-   - ✅ `kern --cipher ch test`
-   - ❌ `kern test --cipher ch` (behandelt --cipher als Wort)
-
-2. **Lokale Flags kommen NACH dem Wort:**
-   - ✅ `kern wort1 wort2 -c py wort3`
-   - `-c py` gilt für wort2
-
-3. **Lokale Cipher-Flags sind additiv:**
-   - `kern --cipher ch wort1 -c py` → wort1 nutzt ch + py
-
----
-
-## Hilfe & Weitere Informationen
-
-```bash
-kern --help          # Zeigt alle Optionen
-kern --version       # Zeigt Version
-kern --list-ciphers  # Zeigt alle verfügbaren Cipher
-```
-
-**Entwickler-Doku:** Siehe `CLAUDE.md` für technische Details zur Architektur und Entwicklung.
-
----
-
-**STATUS:** Stabil | **VERSION:** 0.2.9
+**STATUS:** Stabil | **VERSION:** 0.3.1
