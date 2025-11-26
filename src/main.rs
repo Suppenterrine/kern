@@ -588,8 +588,7 @@ struct ParsedPipeline {
 
 /// Parse tokens into a list of input strings and steps.
 /// All inputs are treated equally - no per-input flags.
-/// Inline flags like -t/--total and -l/--lookup are still supported for backward compat,
-/// but global flags (--verbose, --cipher) are preferred.
+/// Only global flags (--total, --lookup) are supported inline.
 fn parse_pipeline_tokens(
     tokens: &[String],
     _cipher_aliases: &HashMap<String, String>,
@@ -599,10 +598,8 @@ fn parse_pipeline_tokens(
     let mut saw_total = false;
     let mut saw_lookup = false;
 
-    // Simple input parsing: filter out inline flags, collect inputs
-    let mut i = 0;
-    while i < tokens.len() {
-        let token = &tokens[i];
+    // Simple input parsing: collect inputs and recognize inline flags
+    for token in tokens {
         match token.as_str() {
             "-t" | "--total" => {
                 saw_total = true;
@@ -610,24 +607,11 @@ fn parse_pipeline_tokens(
             "-l" | "--lookup" => {
                 saw_lookup = true;
             }
-            "-v" | "-c" => {
-                // These were local flags in the old system
-                // For now, warn and skip to avoid breaking old workflows
-                eprintln!(
-                    "Warning: Local flag '{}' is deprecated. Use global flags instead (--verbose, --cipher).",
-                    token
-                );
-                // Skip next token if it's -c (which expects a value)
-                if token == "-c" && i + 1 < tokens.len() {
-                    i += 1;
-                }
-            }
             _ => {
                 // Treat as input
                 inputs.push(token.clone());
             }
         }
-        i += 1;
     }
 
     // Create a reduce step for each input
