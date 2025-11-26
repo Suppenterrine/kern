@@ -55,7 +55,7 @@ impl Pipeline {
         let mut result_set = ResultSet::new();
 
         for step in &self.steps {
-            let effective_verbose = step.local_flags.verbose.unwrap_or(ctx.global_flags.verbose);
+            let effective_verbose = ctx.global_flags.verbose;
 
             match &step.operation {
                 Operation::Reduce | Operation::DateReduce => {
@@ -173,26 +173,19 @@ impl Pipeline {
 
     fn select_ciphers<'a>(
         &self,
-        step: &Step,
+        _step: &Step,
         ciphers: &'a [Box<dyn Cipher>],
         global_cipher_names: &[String],
     ) -> Vec<(usize, &'a Box<dyn Cipher>)> {
         use std::collections::HashSet;
 
-        // Build the set of cipher names to use
-        let mut target_names: HashSet<String> = global_cipher_names
+        // Build the set of cipher names from global flags only (no local flags)
+        let target_names: HashSet<String> = global_cipher_names
             .iter()
             .map(|s| s.to_lowercase())
             .collect();
 
-        // If local ciphers specified, ADD them to the global set (additive behavior)
-        if let Some(local_names) = &step.local_flags.ciphers {
-            for name in local_names {
-                target_names.insert(name.to_lowercase());
-            }
-        }
-
-        // If no target names (no global, no local), return all ciphers
+        // If no global ciphers specified, return all ciphers
         if target_names.is_empty() {
             return ciphers
                 .iter()
