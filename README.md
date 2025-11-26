@@ -36,6 +36,13 @@ cargo build --release
 
 **Voraussetzungen:** Rust 1.70+, Cargo
 
+**Android/Termux Build:**
+```bash
+# Ohne Clipboard-Feature (für Plattformen ohne Clipboard-Support)
+cargo build --release --no-default-features
+```
+*Bei deaktiviertem Clipboard-Feature wird der SPEKTRA-Prompt als Text ausgegeben statt in die Zwischenablage kopiert.*
+
 </details>
 
 ---
@@ -135,6 +142,8 @@ $ kern --spektra test
 ⊕ Prompt in Zwischenablage kopiert
 ```
 (Der vollständige numerologische Analyseprompt ist in der Zwischenablage und kann mit `Ctrl+V` eingefügt werden)
+
+*Hinweis: Bei Builds ohne Clipboard-Feature (`--no-default-features`) wird der Prompt direkt als Text ausgegeben.*
 
 **Lokale Cipher pro Input:**
 ```bash
