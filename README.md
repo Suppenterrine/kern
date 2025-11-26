@@ -76,12 +76,22 @@ kern --total wort1 wort2 wort3
 ### Bedeutungen nachschlagen
 ```bash
 kern --lookup test
-# Zeigt eine Tabelle mit der numerologischen Bedeutung der Zahl
+# Zeigt die numerologische Bedeutung:
+# 1 · Ursprung, Wille, Individualität, Neubeginn
+#   └─ test [ordinal]
 ```
 
-Mit `--licht` und `--schatten` kannst du zusätzliche Aspekte anzeigen:
+**Vollständige Bedeutung mit `--full`:**
 ```bash
-kern --lookup --licht --schatten test
+kern --lookup --full test
+# Zeigt Bedeutung + positive & negative Aspekte
+```
+
+**Nur positive oder negative Aspekte:**
+```bash
+kern --lookup --pos test     # Nur positive Aspekte
+kern --lookup --neg test     # Nur negative Aspekte
+kern --lookup --pos --neg test  # Beide einzeln
 ```
 
 ---
@@ -213,6 +223,38 @@ kern --length test beispiel wort
 # wort [ordinal]: 9 (4)
 ```
 
+### Lookup-Ausgabeformat
+
+Das neue Lookup-Format ist übersichtlich und flexibel:
+
+**Standard:**
+```
+7 · Tiefe, Intuition, Analyse, Rückzug
+  └─ test [ordinal]
+```
+
+**Mehrere Quellen mit gleichem Wert:**
+```
+1 · Ursprung, Wille, Individualität, Neubeginn
+  ├─ test [pythagorean]
+  └─ word [chaldean]
+```
+
+**Mit --full (vollständige Bedeutung):**
+```
+1 · Ursprung, Wille, Individualität, Neubeginn
+  Quellen:
+    └─ test [ordinal]
+
+  ⊕ Positiv:
+    Pioniergeist, Führungsqualitäten, Mut zu neuen Wegen,
+    Selbstvertrauen, Unabhängigkeit
+
+  ⊖ Negativ:
+    Egoismus, Sturheit, Dominanz, Rücksichtslosigkeit,
+    Isolation durch Selbstüberschätzung
+```
+
 ---
 
 ## Web-API Server
@@ -234,9 +276,12 @@ GET /reduce?input=test,hallo&debug=true
 **Bedeutung nachschlagen:**
 ```
 GET /lookup/7
-GET /lookup/7?parts=light
+GET /lookup/7?parts=pos        # Nur positive Aspekte
+GET /lookup/7?parts=full       # Vollständige Bedeutung
 GET /lookup?numbers=1,2,3&parts=both
 ```
+
+**Hinweis:** Die API unterstützt sowohl neue (`pos`, `neg`, `full`) als auch alte (`light`, `shadow`) Parameter für Rückwärtskompatibilität. Response-Felder heißen jetzt `positive` und `negative`.
 
 **Datum reduzieren:**
 ```

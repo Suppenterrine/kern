@@ -1,0 +1,229 @@
+⎿  KERN CLI UX Complete Redesign
+
+Design Decisions (from User):
+
+- Multi-cipher format: Grouped by input
+- Language: English labels (consistent with flags)
+- Colors: Infrastructure prepared, activation later
+- Scope: Complete redesign with UI module
+
+---
+Phase 1: Create UI Module & Infrastructure
+
+New file: src/ui/mod.rs
+- Constants for symbols (arrows, tree chars, section separators)
+- Formatting helpers (format_header, format_reduction_step, etc.)
+- TTY detection and terminal width detection
+- Color infrastructure (structs, theme system) - prepared but not activated
+- Spacing rules as constants (SECTION_GAP = 2, etc.)
+
+New file: src/ui/output.rs
+- Dedicated output formatters for each mode:
+  - format_reduce_result() - handles grouped multi-cipher
+  - format_verbose_reduction() - clean trace output
+  - format_lookup() - enhanced hierarchy
+  - format_total() - simplified display
+  - format_date() - unified format
+
+---
+Phase 2: Fix Critical Bugs
+
+File: src/main.rs
+
+1. Line 368, 366, 360: Replace all \u{1a} with proper Unicode →
+2. Line 243: Add return; after date processing block
+3. Line 166-243: Add lookup operation to date pipeline when flag set
+4. Line 456: Remove "Keine weiteren Argumente angegeben." message entirely
+5. Throughout: Standardize spacing (0/1/2 blank lines system)
+
+---
+Phase 3: Redesign All Output Formats
+
+A. Reduce Output (lines ~320-330)
+
+Single cipher:
+test → 1 [ordinal]
+example → 4 [ordinal]
+
+Multiple ciphers (grouped):
+test
+  ordinal → 1
+  pythagorean → 2
+  chaldean → 4
+
+example
+  ordinal → 4
+  pythagorean → 8
+  chaldean → 6
+
+B. Verbose Reduce (lines ~320-324)
+
+Current:
+test [ordinal]
+test → [20+5+19+20] = 64
+→ 6+4 = 10
+→ Quersumme: 1
+
+Redesign:
+test [ordinal]
+  20+5+19+20 = 64
+  6+4 = 10
+  1+0 = 1
+  → 1
+Remove redundant labels, clean hierarchy
+
+C. Total Output (line ~368)
+
+Simple:
+
+Total: 11 → 2
+
+Verbose:
+
+Total Calculation
+  1+4+6 = 11
+  1+1 = 2
+  → 2
+Only show reduction if sum > 9
+
+D. Lookup Output (lines ~394-441)
+
+Standard:
+1 · Origin, Will, Individuality, New Beginning
+  └─ test [ordinal]
+
+4 · Stability, Order, Structure, Security
+  ├─ example [ordinal]
+  └─ word [chaldean]
+Note: Keep German bedeutung text, only labels English
+
+With --full:
+1 · Origin, Will, Individuality, New Beginning
+  Sources:
+    └─ test [ordinal]
+
+  ⊕ Positive
+    Pioniergeist, Führungsqualitäten, Mut zu neuen Wegen,
+    Selbstvertrauen, Unabhängigkeit
+
+  ⊖ Negative
+    Egoismus, Sturheit, Dominanz, Rücksichtslosigkeit,
+    Isolation durch Selbstüberschätzung
+
+E. Date Output (lines ~226-237)
+
+Simple:
++0 · 12.11.2025 → 5 [ordinal]
++1 · 13.11.2025 → 6 [ordinal]
+
+Verbose:
++0 · 12.11.2025 [ordinal]
+  1+2+1+1+2+0+2+5 = 14
+  1+4 = 5
+  → 5
+
++1 · 13.11.2025 [ordinal]
+  ...
+
+F. List Ciphers (lines ~118-126)
+
+Current is good, minor alignment:
+Available Ciphers:
+
+  ordinal (or)            · Ordinal (A=1..Z=26)
+  pythagorean (py)        · Pythagorean / Reduction
+  chaldean (ch)           · Chaldean
+  ...
+
+---
+Phase 4: Implement Spacing System
+
+Rules:
+- 0 lines: Related items (calculation steps, source list)
+- 1 line: Between sections (results → total, entries in lookup)
+- 2 lines: Before major section changes (reduce done → lookup starts)
+
+Apply consistently throughout all output functions
+
+---
+Phase 5: Update lib.rs Reduction Trace
+
+File: src/lib.rs lines 217-259
+
+Simplify trace generation to match new format:
+- Remove redundant "input →" prefix
+- Clean calculation display
+- Final arrow instead of "Quersumme:" label
+
+---
+Phase 6: Terminal Width Detection
+
+Add to UI module:
+- Detect terminal width (fallback to 80)
+- Word-wrap long bedeutung text if needed
+- Smart column alignment based on available width
+
+---
+Phase 7: Integration & Testing
+
+1. Update all output call sites to use UI module functions
+2. Test all combinations:
+  - Single vs multi-cipher
+  - Verbose modes
+  - Date + lookup interaction
+  - Total calculations
+  - List ciphers
+3. Verify spacing consistency
+4. Check no "Keine weiteren..." message appears
+
+---
+Phase 8: Update Documentation
+
+README.md:
+- Update all example outputs to match new format
+- Document new grouped multi-cipher behavior
+- Update verbose output examples
+- Show new total format
+
+---
+File Structure After Redesign:
+
+src/
+├── main.rs              (simplified, delegates to ui module)
+├── lib.rs               (core logic, updated traces)
+├── core/
+│   ├── ciphers/
+│   ├── flow.rs
+│   └── utils.rs
+├── ui/                  (NEW)
+│   ├── mod.rs          (constants, helpers, TTY detection)
+│   ├── output.rs       (all format functions)
+│   └── theme.rs        (color infrastructure, not activated)
+└── bin/
+    └── kern-server.rs
+
+---
+Expected Results:
+
+✅ All critical bugs fixed (control chars, date+lookup, error message)
+✅ Consistent spacing throughout (0/1/2 line system)
+✅ Grouped multi-cipher output for clarity
+✅ English labels for consistency with flags
+✅ Clean, scannable hierarchy everywhere
+✅ UI module ready for future color activation
+✅ Terminal width detection for smart formatting
+✅ Professional, polished CLI aesthetic
+✅ Fast, direct, concrete, weighty, precise feel achieved
+
+---
+Testing Checklist:
+
+- kern test - basic reduce
+- kern --cipher ch,py,or test - multi-cipher grouped
+- kern --verbose test - clean trace
+- kern --total word1 word2 - no control chars
+- kern --lookup test - proper spacing
+- kern --lookup --full test - English labels
+- kern --date 0..2 - no error message
+- kern --lookup --date 0..2 - lookup executes
+- kern --list-ciphers - aligned output
