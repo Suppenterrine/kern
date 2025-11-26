@@ -1,6 +1,6 @@
 # KERN
 
-**Numerologische Reduktion auf Basis von 11 Chiffren-Systemen.** KERN berechnet die digitale Wurzel von Wörtern, Daten und Zahlen mittels verschiedener esoterischer Verschlüsselungssysteme und generiert numerologische Analysen. Verfügbar als CLI und REST-API.
+**Numerologische Reduktion auf Basis von 11 Chiffren-Systemen.** KERN berechnet die digitale Wurzel von Wörtern, Daten und Zahlen mittels verschiedener Verschlüsselungssysteme und generiert numerologische Analysen. Verfügbar als CLI und REST-API.
 
 ---
 
@@ -420,3 +420,4 @@ $ curl "https://kern.drehraum.wtf/spektra?word=Love"
 ---
 
 **STATUS:** Stabil | **VERSION:** 1.1.0
+
