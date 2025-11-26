@@ -243,23 +243,37 @@ pub fn group_results_by_input<'a>(
 // ============================================================================
 
 /// Format and output SPEKTRA analysis prompt
-/// Copies to clipboard, shows minimal confirmation message
+/// Copies to clipboard if available, otherwise prints to stdout
 pub fn format_spektra_output(prompt: &str) {
-    // Try to copy to clipboard
-    match arboard::Clipboard::new() {
-        Ok(mut clipboard) => {
-            match clipboard.set_text(prompt.to_string()) {
-                Ok(_) => {
-                    // Show minimal confirmation
-                    println!("{} Prompt in Zwischenablage kopiert", SYMBOL_POSITIVE);
-                }
-                Err(_) => {
-                    // Silently ignore clipboard copy failures
+    // Try to copy to clipboard if clipboard feature is enabled
+    #[cfg(feature = "clipboard")]
+    {
+        match arboard::Clipboard::new() {
+            Ok(mut clipboard) => {
+                match clipboard.set_text(prompt.to_string()) {
+                    Ok(_) => {
+                        // Show minimal confirmation
+                        println!("{} Prompt in Zwischenablage kopiert", SYMBOL_POSITIVE);
+                        return;
+                    }
+                    Err(_) => {
+                        // Fall through to print the prompt
+                    }
                 }
             }
-        }
-        Err(_) => {
-            // Silently ignore clipboard access failures (e.g., headless systems)
+            Err(_) => {
+                // Fall through to print the prompt
+            }
         }
     }
+
+    // Clipboard not available or failed - print the prompt to stdout
+    #[cfg(not(feature = "clipboard"))]
+    println!("{} SPEKTRA Prompt (Zwischenablage nicht verfügbar):", SYMBOL_POSITIVE);
+
+    #[cfg(feature = "clipboard")]
+    println!("{} SPEKTRA Prompt (Zwischenablage fehlgeschlagen):", SYMBOL_POSITIVE);
+
+    println!();
+    println!("{}", prompt);
 }
