@@ -31,11 +31,18 @@ pub mod core {
     #[path = "../core/spektra.rs"]
     pub mod spektra;
 
+    #[path = "../core/phase.rs"]
+    pub mod phase;
+
     pub use flow::{FlowContext, FlowFlags, Pipeline};
 
     pub use ciphers::{
         Cipher, CipherDescriptor, OrdinalCipher, PythagoreanCipher, ReverseOrdinalCipher,
         ReversePythagoreanCipher, available_cipher_names, default_cipher, descriptors, get_cipher,
+    };
+
+    pub use phase::{
+        PhaseRelationResult, calculate_compartment, calculate_phase, generate_matrix_pairs,
     };
 
     use utils::char_to_value_ordinal;
@@ -47,6 +54,7 @@ pub mod core {
         AggregateTotal,
         DateReduce,
         Lookup,
+        PhaseRelation,
         Custom(String),
     }
 
@@ -57,6 +65,7 @@ pub mod core {
                 Operation::AggregateTotal => write!(f, "aggregate::total"),
                 Operation::DateReduce => write!(f, "date::reduce"),
                 Operation::Lookup => write!(f, "lookup"),
+                Operation::PhaseRelation => write!(f, "phase::relation"),
                 Operation::Custom(name) => write!(f, "{name}"),
             }
         }
@@ -67,6 +76,16 @@ pub mod core {
         pub pipe_index: usize,
         pub cipher_index: usize,
         pub operation: Operation,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub metadata: Option<StepMetadata>,
+    }
+
+    #[derive(Debug, Clone, Serialize)]
+    pub enum StepMetadata {
+        PhaseRelation {
+            left_index: usize,
+            right_index: usize,
+        },
     }
 
     impl Step {
@@ -75,7 +94,13 @@ pub mod core {
                 pipe_index,
                 cipher_index,
                 operation,
+                metadata: None,
             }
+        }
+
+        pub fn with_metadata(mut self, metadata: StepMetadata) -> Self {
+            self.metadata = Some(metadata);
+            self
         }
     }
 

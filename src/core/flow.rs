@@ -1,4 +1,5 @@
-use super::{Cipher, KernResult, Operation, ResultSet, Step};
+use super::{Cipher, KernResult, Operation, ResultSet, Step, StepMetadata};
+use super::phase::PhaseRelationResult;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap, hash_map::Entry};
 
@@ -13,6 +14,7 @@ pub struct FlowFlags {
 pub struct FlowContext {
     pub global_flags: FlowFlags,
     pub memory: Vec<KernResult>,
+    pub phase_results: Vec<PhaseRelationResult>,
 }
 
 impl FlowContext {
@@ -20,11 +22,16 @@ impl FlowContext {
         Self {
             global_flags,
             memory: Vec::new(),
+            phase_results: Vec::new(),
         }
     }
 
     pub fn record(&mut self, result: KernResult) {
         self.memory.push(result);
+    }
+
+    pub fn record_phase(&mut self, result: PhaseRelationResult) {
+        self.phase_results.push(result);
     }
 }
 
@@ -161,6 +168,47 @@ impl Pipeline {
 
                     ctx.record(result.clone());
                     result_set.add(result);
+                }
+                Operation::PhaseRelation => {
+                    // PhaseRelation requires metadata with indices
+                    if let Some(StepMetadata::PhaseRelation { left_index, right_index }) = &step.metadata {
+                        // Get both inputs
+                        if let (Some(left_input), Some(right_input)) =
+                            (inputs.get(*left_index), inputs.get(*right_index)) {
+
+                            // Process with each selected cipher
+                            for (cipher_index, cipher) in self.select_ciphers(step, ciphers, &ctx.global_flags.ciphers) {
+                                let mut ctx_step = step.clone();
+                                ctx_step.cipher_index = cipher_index;
+
+                                // Reduce both inputs
+                                let left_result = KernResult::from_input(
+                                    left_input,
+                                    effective_verbose,
+                                    cipher.as_ref(),
+                                    ctx_step.clone(),
+                                );
+                                let right_result = KernResult::from_input(
+                                    right_input,
+                                    effective_verbose,
+                                    cipher.as_ref(),
+                                    ctx_step.clone(),
+                                );
+
+                                // Calculate phase relation
+                                let phase_result = PhaseRelationResult::new(
+                                    left_input.clone(),
+                                    right_input.clone(),
+                                    left_result.value(),
+                                    right_result.value(),
+                                    cipher.name().to_string(),
+                                );
+
+                                // Store in context
+                                ctx.record_phase(phase_result);
+                            }
+                        }
+                    }
                 }
                 Operation::Custom(_) => {
                     // Placeholder for future extensions.

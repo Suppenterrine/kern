@@ -1,8 +1,8 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
-    default_cipher, descriptors, get_cipher, load_bedeutungen, parse_range,
+    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepMetadata,
+    default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen, parse_range,
 };
 use kern::ui;
 use serde::Deserialize;
@@ -100,6 +100,13 @@ fn main() {
                 .help("Generate SPEKTRA analysis prompt (uses all ciphers automatically)"),
         )
         .arg(
+            Arg::new("phase-relation-matrix")
+                .long("phase-relation-matrix")
+                .visible_alias("prm")
+                .action(ArgAction::SetTrue)
+                .help("Calculate phase relation matrix for all input pairs"),
+        )
+        .arg(
             Arg::new("ARGS")
                 .num_args(1..)
                 .allow_hyphen_values(true)
@@ -115,6 +122,7 @@ fn main() {
     let show_neg = matches.get_flag("neg");
     let show_full = matches.get_flag("full");
     let show_spektra = matches.get_flag("spektra");
+    let show_pmr = matches.get_flag("phase-relation-matrix");
 
     if matches.get_flag("list-ciphers") {
         let cipher_list: Vec<(String, String, String)> = descriptors()
@@ -370,7 +378,7 @@ fn main() {
     if let Some(args_values) = matches.get_many::<String>("ARGS") {
         let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
 
-        let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map) {
+        let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map, show_pmr) {
             Ok(data) => data,
             Err(err) => {
                 eprintln!("{err}");
@@ -414,6 +422,21 @@ fn main() {
 
         let result_set = pipeline.run(&mut ctx, &args, &selected_ciphers);
 
+        // Check if we're in phase relation mode
+        let is_phase_mode = !parsed.phase_inputs.is_empty();
+
+        if is_phase_mode {
+            // Phase relation mode: output phase results
+            ui::output::format_phase_relation_results(&ctx.phase_results, &selected_ciphers);
+
+            if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
+                if let Ok(debug_json) = serde_json::to_string_pretty(&ctx.phase_results) {
+                    eprintln!("[KERN DEBUG] PhaseResults = {debug_json}");
+                }
+            }
+            return;
+        }
+
         let mut base_results: HashMap<(usize, usize), &KernResult> = HashMap::new();
         let mut aggregate_results: Vec<&KernResult> = Vec::new();
         let mut lookup_results: Vec<&KernResult> = Vec::new();
@@ -425,6 +448,7 @@ fn main() {
                 }
                 Operation::AggregateTotal => aggregate_results.push(result),
                 Operation::Lookup => lookup_results.push(result),
+                Operation::PhaseRelation => {}, // Handled separately
                 Operation::Custom(_) => {}
             }
         }
@@ -584,21 +608,27 @@ struct ParsedPipeline {
     steps: Vec<Step>,
     saw_total: bool,
     saw_lookup: bool,
+    phase_inputs: Vec<PhaseInput>,
+}
+
+struct PhaseInput {
+    #[allow(dead_code)]
+    parts: Vec<String>,
 }
 
 /// Parse tokens into a list of input strings and steps.
-/// All inputs are treated equally - no per-input flags.
-/// Only global flags (--total, --lookup) are supported inline.
+/// If phase_mode is true, creates PhaseRelation steps for all pairs.
 fn parse_pipeline_tokens(
     tokens: &[String],
     _cipher_aliases: &HashMap<String, String>,
+    phase_mode: bool,
 ) -> Result<ParsedPipeline, String> {
     let mut inputs = Vec::new();
     let mut steps = Vec::new();
     let mut saw_total = false;
     let mut saw_lookup = false;
 
-    // Simple input parsing: collect inputs and recognize inline flags
+    // Parse tokens: separate flags and inputs
     for token in tokens {
         match token.as_str() {
             "-t" | "--total" => {
@@ -608,13 +638,51 @@ fn parse_pipeline_tokens(
                 saw_lookup = true;
             }
             _ => {
-                // Treat as input
+                // All other tokens are inputs
                 inputs.push(token.clone());
             }
         }
     }
 
-    // Create a reduce step for each input
+    // If we're in phase relation mode
+    if phase_mode {
+        if inputs.len() < 2 {
+            return Err("Phase relation matrix requires at least 2 inputs".to_string());
+        }
+
+        // --total and --lookup are not supported with phase relations (for now)
+        if saw_total {
+            return Err("--total is not supported with phase relation mode".to_string());
+        }
+        if saw_lookup {
+            return Err("--lookup is not supported with phase relation mode".to_string());
+        }
+
+        // Generate matrix pairs from all inputs
+        let pairs = generate_matrix_pairs(inputs.len());
+
+        // Create PhaseRelation steps for each pair
+        for (left_idx, right_idx) in pairs {
+            let step = Step::new(0, 0, Operation::PhaseRelation)
+                .with_metadata(StepMetadata::PhaseRelation {
+                    left_index: left_idx,
+                    right_index: right_idx,
+                });
+            steps.push(step);
+        }
+
+        let phase_input = PhaseInput { parts: inputs.clone() };
+
+        return Ok(ParsedPipeline {
+            inputs,
+            steps,
+            saw_total,
+            saw_lookup,
+            phase_inputs: vec![phase_input],
+        });
+    }
+
+    // Regular mode: create reduce steps
     for (idx, _input) in inputs.iter().enumerate() {
         let step = Step::new(idx, 0, Operation::Reduce);
         steps.push(step);
@@ -625,5 +693,6 @@ fn parse_pipeline_tokens(
         steps,
         saw_total,
         saw_lookup,
+        phase_inputs: vec![],
     })
 }
