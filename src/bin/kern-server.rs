@@ -7,7 +7,8 @@ use axum::{
 use chrono::{Duration, Local};
 use kern::core::{
     Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
-    descriptors, load_bedeutungen, lookup, parse_range, reduce_number_steps, reduce_number_verbose,
+    StepMetadata, descriptors, generate_matrix_pairs, load_bedeutungen, lookup, parse_range,
+    reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -50,6 +51,8 @@ async fn root_handler() -> Json<ApiOverview> {
     examples.insert("lookup_multi", "/lookup?numbers=1,7,11&parts=full");
     examples.insert("date_range", "/date?range=0..7&debug=true");
     examples.insert("spektra", "/spektra?word=Love");
+    examples.insert("phase_simple", "/phase?inputs=a,b");
+    examples.insert("phase_multi", "/phase?inputs=a,b,c&cipher=all");
 
     Json(ApiOverview {
         name: "KERN API",
@@ -89,6 +92,11 @@ async fn root_handler() -> Json<ApiOverview> {
                 path: "/spektra",
                 method: "GET",
                 description: "Multi-cipher spectral analysis for LLM prompt generation",
+            },
+            EndpointInfo {
+                path: "/phase",
+                method: "GET",
+                description: "Calculate phase relation matrix for multiple inputs",
             },
         ],
         examples,
@@ -601,6 +609,139 @@ async fn spektra_handler(
 }
 
 // ============================================================================
+// Phase Relation Matrix Endpoint
+// ============================================================================
+
+#[derive(Deserialize)]
+struct PhaseParams {
+    inputs: String,         // Comma-separated inputs
+    cipher: Option<String>, // Optional cipher codes (comma-separated or "all")
+}
+
+#[derive(Serialize)]
+struct PhaseRelationItem {
+    left_input: String,
+    right_input: String,
+    left_value: u32,
+    right_value: u32,
+    left_compartment: u32,
+    right_compartment: u32,
+    phase: i32,
+    cipher: String,
+}
+
+#[derive(Serialize)]
+struct PhaseResponse {
+    relations: Vec<PhaseRelationItem>,
+}
+
+async fn phase_handler(
+    Query(params): Query<PhaseParams>,
+) -> Result<Json<PhaseResponse>, (StatusCode, Json<ErrorResponse>)> {
+    // Parse inputs
+    let inputs: Vec<String> = params
+        .inputs
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if inputs.len() < 2 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "Phase relation matrix requires at least 2 inputs".into(),
+            }),
+        ));
+    }
+
+    // Parse cipher parameter
+    let cipher_codes = if let Some(ref cipher_param) = params.cipher {
+        let cipher_param = cipher_param.trim();
+        if cipher_param == "all" {
+            // Use all available ciphers
+            descriptors()
+                .iter()
+                .map(|d| d.short.to_string())
+                .collect()
+        } else {
+            // Parse comma-separated cipher codes
+            cipher_param
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect()
+        }
+    } else {
+        vec!["or".to_string()] // Default to ordinal
+    };
+
+    // Build cipher instances
+    let all_descriptors = descriptors();
+    let mut ciphers: Vec<Box<dyn Cipher>> = Vec::new();
+    for code in &cipher_codes {
+        match all_descriptors.iter().find(|d| d.short.to_lowercase() == *code || d.name.to_lowercase() == *code) {
+            Some(descriptor) => ciphers.push((descriptor.factory)()),
+            None => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: format!("Unknown cipher code: {}", code),
+                    }),
+                ));
+            }
+        }
+    }
+
+    if ciphers.is_empty() {
+        ciphers.push((all_descriptors[0].factory)()); // Fallback to ordinal
+    }
+
+    let cipher_names: Vec<String> = ciphers.iter().map(|c| c.name().to_string()).collect();
+
+    // Generate matrix pairs
+    let pairs = generate_matrix_pairs(inputs.len());
+
+    // Build pipeline with PhaseRelation steps
+    let mut pipeline = Pipeline::new();
+    for (left_idx, right_idx) in pairs {
+        let step = Step::new(0, 0, Operation::PhaseRelation)
+            .with_metadata(StepMetadata::PhaseRelation {
+                left_index: left_idx,
+                right_index: right_idx,
+            });
+        pipeline.add_step(step);
+    }
+
+    // Execute pipeline
+    let mut ctx = FlowContext::new(FlowFlags {
+        verbose: false,
+        ciphers: cipher_names,
+        total: false,
+    });
+
+    let _result_set = pipeline.run(&mut ctx, &inputs, &ciphers);
+
+    // Convert PhaseRelationResult to API response format
+    let relations: Vec<PhaseRelationItem> = ctx
+        .phase_results
+        .iter()
+        .map(|r| PhaseRelationItem {
+            left_input: r.left_input.clone(),
+            right_input: r.right_input.clone(),
+            left_value: r.left_value,
+            right_value: r.right_value,
+            left_compartment: r.left_compartment,
+            right_compartment: r.right_compartment,
+            phase: r.phase,
+            cipher: r.cipher.clone(),
+        })
+        .collect();
+
+    Ok(Json(PhaseResponse { relations }))
+}
+
+// ============================================================================
 // Main Server Setup
 // ============================================================================
 
@@ -617,6 +758,7 @@ async fn main() {
         .route("/lookup/:number", get(lookup_handler))
         .route("/date", get(date_handler))
         .route("/spektra", get(spektra_handler))
+        .route("/phase", get(phase_handler))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
