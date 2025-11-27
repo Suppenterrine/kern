@@ -419,5 +419,5 @@ $ curl "https://kern.drehraum.wtf/spektra?word=Love"
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 1.1.0
+**STATUS:** Stabil | **VERSION:** 1.1.1
 

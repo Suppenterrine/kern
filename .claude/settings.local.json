@@ -15,7 +15,8 @@
       "Bash(xargs ./target/release/kern.exe)",
       "Bash(cargo test:*)",
       "Bash(curl:*)",
-      "Bash(python -m json.tool:*)"
+      "Bash(python -m json.tool:*)",
+      "Bash(./target/release/kern-server.exe:*)"
     ],
     "deny": [],
     "ask": []

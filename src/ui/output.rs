@@ -3,7 +3,7 @@
 //! All output formatting is centralized here for consistency.
 
 use super::*;
-use crate::core::{Bedeutung, KernResult};
+use crate::core::{Bedeutung, Cipher, KernResult, PhaseRelationResult};
 use std::collections::HashMap;
 
 // ============================================================================
@@ -276,4 +276,124 @@ pub fn format_spektra_output(prompt: &str) {
 
     println!();
     println!("{}", prompt);
+}
+
+// ============================================================================
+// PHASE RELATION OUTPUT
+// ============================================================================
+
+/// Format phase value with proper sign
+fn format_phase(phase: i32) -> String {
+    match phase {
+        -1 => "-1".to_string(),
+        0 => "0".to_string(),
+        1 => "+1".to_string(),
+        _ => phase.to_string(),
+    }
+}
+
+/// Format compartment visualization with underline
+/// Only shows single-digit values (1-9) in compartments, not master numbers
+fn format_compartment_viz(value: u32, compartment: u32) -> String {
+    // For master numbers, map to their representative digit in the compartment
+    let display_value = match value {
+        11 => 1,  // Masterzahl 11 → show 1 in compartment 1
+        22 => 2,  // Masterzahl 22 → show 2 in compartment 2
+        33 => 3,  // Masterzahl 33 → show 3 in compartment 3
+        _ => value,
+    };
+
+    let comp1 = if compartment == 1 {
+        format!("\x1b[4m{}\x1b[0m47", display_value)  // Underline the value
+    } else {
+        "147".to_string()
+    };
+
+    let comp2 = if compartment == 2 {
+        format!("2\x1b[4m{}\x1b[0m8", display_value)  // Underline the value
+    } else {
+        "258".to_string()
+    };
+
+    let comp3 = if compartment == 3 {
+        format!("36\x1b[4m{}\x1b[0m", display_value)  // Underline the value
+    } else {
+        "369".to_string()
+    };
+
+    format!("[{}] [{}] [{}]", comp1, comp2, comp3)
+}
+
+/// Format a single phase relation result
+pub fn format_phase_relation_single(result: &PhaseRelationResult) {
+    println!(
+        "{}+{} = {} ({}→{}) [{}]",
+        result.left_input,
+        result.right_input,
+        format_phase(result.phase),
+        result.left_compartment,
+        result.right_compartment,
+        result.cipher
+    );
+
+    // Show compartment visualization for left input
+    println!(
+        "{} {}",
+        result.left_input,
+        format_compartment_viz(result.left_value, result.left_compartment)
+    );
+
+    // Show compartment visualization for right input
+    println!(
+        "{} {}",
+        result.right_input,
+        format_compartment_viz(result.right_value, result.right_compartment)
+    );
+}
+
+/// Format phase relation results, grouped by cipher
+pub fn format_phase_relation_results(
+    results: &[PhaseRelationResult],
+    ciphers: &[Box<dyn Cipher>],
+) {
+    if results.is_empty() {
+        println!("No phase relation results");
+        return;
+    }
+
+    // Group results by cipher
+    let mut by_cipher: HashMap<String, Vec<&PhaseRelationResult>> = HashMap::new();
+    for result in results {
+        by_cipher
+            .entry(result.cipher.clone())
+            .or_insert_with(Vec::new)
+            .push(result);
+    }
+
+    // If only one cipher, show compact format with compartment viz
+    if ciphers.len() == 1 {
+        for result in results {
+            format_phase_relation_single(result);
+            println!();  // Blank line between pairs
+        }
+        return;
+    }
+
+    // Multiple ciphers: group by cipher
+    for cipher in ciphers {
+        let cipher_name = cipher.name();
+        if let Some(cipher_results) = by_cipher.get(cipher_name) {
+            println!("[{}]", cipher_name);
+            for result in cipher_results {
+                println!(
+                    "{}{}+{} = {}",
+                    INDENT_BASE,
+                    result.left_input,
+                    result.right_input,
+                    format_phase(result.phase)
+                );
+            }
+            println!();
+        }
+    }
 }
