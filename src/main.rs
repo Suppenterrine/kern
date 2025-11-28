@@ -5,9 +5,134 @@ use kern::core::{
     default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen, parse_range,
 };
 use kern::ui;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
+
+// ============================================================================
+// JSON Output Structures (for piping support)
+// ============================================================================
+
+/// Output mode detection based on TTY
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputMode {
+    Tty,    // Terminal: human-readable output
+    Piped,  // Piped: JSON output
+}
+
+impl OutputMode {
+    fn detect() -> Self {
+        if ui::is_tty() {
+            Self::Tty
+        } else {
+            Self::Piped
+        }
+    }
+}
+
+/// Error response for JSON mode
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+/// Cipher result in multi-cipher mode
+#[derive(Serialize)]
+struct CipherResult {
+    name: String,
+    code: String,
+    value: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>,
+}
+
+/// Single reduce item
+#[derive(Serialize)]
+struct ReduceItem {
+    input: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ciphers: Option<Vec<CipherResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>,
+}
+
+/// Reduce mode response
+#[derive(Serialize)]
+struct ReduceResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    items: Option<Vec<ReduceItem>>,
+    total: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_chain: Option<Vec<String>>,
+}
+
+/// Lookup response for a single number
+#[derive(Serialize)]
+struct LookupResponse {
+    number: u32,
+    meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    positive: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    negative: Option<String>,
+}
+
+/// Lookup mode response (multiple numbers)
+#[derive(Serialize)]
+struct LookupListResponse {
+    items: Vec<LookupResponse>,
+}
+
+/// Single date item
+#[derive(Serialize)]
+struct DateItem {
+    offset: i32,
+    date: String,
+    value: u32,
+    meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain: Option<Vec<String>>,
+}
+
+/// Date mode response
+#[derive(Serialize)]
+struct DateResponse {
+    dates: Vec<DateItem>,
+}
+
+/// Phase relation item
+#[derive(Serialize)]
+struct PhaseRelationItem {
+    left_input: String,
+    right_input: String,
+    left_value: u32,
+    right_value: u32,
+    left_compartment: u32,
+    right_compartment: u32,
+    phase: i32,
+    cipher: String,
+}
+
+/// Phase relation mode response
+#[derive(Serialize)]
+struct PhaseResponse {
+    relations: Vec<PhaseRelationItem>,
+}
+
+/// Spektra mode response
+#[derive(Serialize)]
+struct SpektraResponse {
+    word: String,
+    prompt: String,
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
 
 fn main() {
     let version = env!("CARGO_PKG_VERSION");
@@ -114,6 +239,10 @@ fn main() {
         )
         .get_matches();
 
+    // Detect output mode (TTY vs piped)
+    let output_mode = OutputMode::detect();
+    let is_tty = matches!(output_mode, OutputMode::Tty);
+
     let debug = matches.get_flag("debug");
     let mut show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
@@ -150,10 +279,9 @@ fn main() {
                             .iter()
                             .map(|d| format!("{} ({})", d.name, d.short))
                             .collect();
-                        eprintln!(
-                            "Unknown cipher: {}. Available: {}",
-                            value,
-                            available.join(", "),
+                        output_error(
+                            &format!("Unknown cipher: {}. Available: {}", value, available.join(", ")),
+                            is_tty,
                         );
                     }
                 }
@@ -214,6 +342,20 @@ fn main() {
                     }
                 }
 
+                // JSON output mode for dates
+                if !is_tty {
+                    // Collect first result from each row for JSON output
+                    let flat_results: Vec<Option<&KernResult>> = results_matrix
+                        .iter()
+                        .map(|row| row.first().copied().flatten())
+                        .collect();
+
+                    let bedeutungen = load_bedeutungen();
+                    output_date_json(&offsets, &formatted_dates, &flat_results, &bedeutungen, debug);
+                    return;
+                }
+
+                // TTY output mode
                 if ctx.global_flags.verbose {
                     for (row_index, off) in offsets.iter().enumerate() {
                         let display_date = formatted_dates[row_index];
@@ -302,7 +444,7 @@ fn main() {
                     }
                 }
             }
-            Err(e) => eprintln!("{e}"),
+            Err(e) => output_error(&e, is_tty),
         }
         return; // Date processing complete, exit early
     }
@@ -314,8 +456,7 @@ fn main() {
             let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
             
             if raw_tokens.is_empty() {
-                eprintln!("--spektra requires a word argument");
-                return;
+                output_error("--spektra requires a word argument", is_tty);
             }
 
             // Only use the first word for spektra analysis
@@ -363,10 +504,14 @@ fn main() {
             // Build spektra prompt
             match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &bedeutungen) {
                 Ok(prompt) => {
-                    ui::output::format_spektra_output(&prompt);
+                    if is_tty {
+                        ui::output::format_spektra_output(&prompt, is_tty);
+                    } else {
+                        output_spektra_json(word, &prompt);
+                    }
                 }
                 Err(e) => {
-                    eprintln!("Error building spektra prompt: {}", e);
+                    output_error(&format!("Error building spektra prompt: {}", e), is_tty);
                 }
             }
         }
@@ -381,8 +526,7 @@ fn main() {
         let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map, show_pmr) {
             Ok(data) => data,
             Err(err) => {
-                eprintln!("{err}");
-                return;
+                output_error(&err, is_tty);
             }
         };
 
@@ -427,7 +571,11 @@ fn main() {
 
         if is_phase_mode {
             // Phase relation mode: output phase results
-            ui::output::format_phase_relation_results(&ctx.phase_results, &selected_ciphers);
+            if is_tty {
+                ui::output::format_phase_relation_results(&ctx.phase_results, &selected_ciphers);
+            } else {
+                output_phase_json(&ctx.phase_results);
+            }
 
             if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
                 if let Ok(debug_json) = serde_json::to_string_pretty(&ctx.phase_results) {
@@ -455,6 +603,33 @@ fn main() {
 
         let cipher_count = selected_ciphers.len();
 
+        // JSON output mode for reduce/lookup
+        if !is_tty {
+            if show_lookup {
+                // Lookup mode: only output lookup results
+                let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
+                if let Some(data) = payload {
+                    #[derive(Deserialize)]
+                    struct LookupEntry {
+                        value: u32,
+                        sources: Vec<String>,
+                    }
+                    if let Ok(entries) = serde_json::from_str::<Vec<LookupEntry>>(data) {
+                        if !entries.is_empty() {
+                            let bedeutungen = load_bedeutungen();
+                            let lookup_refs: Vec<&KernResult> = lookup_results.iter().copied().collect();
+                            output_lookup_json(&lookup_refs, &bedeutungen, show_pos, show_neg, show_full);
+                        }
+                    }
+                }
+            } else {
+                // Reduce mode: output reduce results
+                output_reduce_json(&args, &result_set, &selected_ciphers, debug, show_length, show_total);
+            }
+            return;
+        }
+
+        // TTY output mode
         if cipher_count > 0 {
             // Group results by input
             let mut grouped_by_input: HashMap<&str, Vec<(&str, u32, bool, &[String])>> = HashMap::new();
@@ -587,6 +762,242 @@ fn main() {
     }
     // Note: If no ARGS provided, quietly exit (no error message needed)
 }
+
+// ============================================================================
+// Error Handling Helper
+// ============================================================================
+
+/// Output error message and exit
+/// In TTY mode: prints to stderr
+/// In pipe mode: prints JSON error to stdout
+fn output_error(message: &str, is_tty: bool) -> ! {
+    if is_tty {
+        eprintln!("{}", message);
+        std::process::exit(1);
+    } else {
+        // Pipe mode: JSON to stdout
+        let error = ErrorResponse {
+            error: message.to_string(),
+        };
+        if let Ok(json) = serde_json::to_string(&error) {
+            println!("{}", json);
+        }
+        std::process::exit(1);
+    }
+}
+
+// ============================================================================
+// JSON Output Functions (for piping mode)
+// ============================================================================
+
+/// Output spektra response as JSON
+fn output_spektra_json(word: &str, prompt: &str) {
+    let response = SpektraResponse {
+        word: word.to_string(),
+        prompt: prompt.to_string(),
+    };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+/// Output phase relation results as JSON
+fn output_phase_json(phase_results: &[kern::core::PhaseRelationResult]) {
+    let relations: Vec<PhaseRelationItem> = phase_results
+        .iter()
+        .map(|pr| PhaseRelationItem {
+            left_input: pr.left_input.clone(),
+            right_input: pr.right_input.clone(),
+            left_value: pr.left_value,
+            right_value: pr.right_value,
+            left_compartment: pr.left_compartment,
+            right_compartment: pr.right_compartment,
+            phase: pr.phase,
+            cipher: pr.cipher.clone(),
+        })
+        .collect();
+
+    let response = PhaseResponse { relations };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+/// Output date results as JSON
+fn output_date_json(
+    offsets: &[i32],
+    formatted_dates: &[chrono::NaiveDate],
+    results: &[Option<&KernResult>],
+    bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    debug: bool,
+) {
+    let mut dates = Vec::new();
+
+    for (i, off) in offsets.iter().enumerate() {
+        if let Some(result) = results.get(i).and_then(|r| *r) {
+            let date = formatted_dates.get(i).map(|d| d.format("%d.%m.%Y").to_string()).unwrap_or_default();
+            let meaning = bedeutungen
+                .get(&result.value)
+                .and_then(|b| b.text.as_deref())
+                .unwrap_or("- keine Bedeutung -")
+                .to_string();
+
+            dates.push(DateItem {
+                offset: *off,
+                date,
+                value: result.value,
+                meaning,
+                chain: if debug { Some(result.trace.clone()) } else { None },
+            });
+        }
+    }
+
+    let response = DateResponse { dates };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+/// Output lookup results as JSON
+fn output_lookup_json(
+    lookup_results: &[&KernResult],
+    bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    show_pos: bool,
+    show_neg: bool,
+    show_full: bool,
+) {
+    let mut items = Vec::new();
+
+    for result in lookup_results {
+        let entry = bedeutungen.get(&result.value);
+        let meaning = entry
+            .and_then(|b| b.text.as_deref())
+            .unwrap_or("- keine Bedeutung -")
+            .to_string();
+
+        let positive = if show_pos || show_full {
+            entry.and_then(|b| b.licht.clone())
+        } else {
+            None
+        };
+
+        let negative = if show_neg || show_full {
+            entry.and_then(|b| b.schatten.clone())
+        } else {
+            None
+        };
+
+        items.push(LookupResponse {
+            number: result.value,
+            meaning,
+            positive,
+            negative,
+        });
+    }
+
+    let response = LookupListResponse { items };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+/// Output reduce results as JSON
+fn output_reduce_json(
+    args: &[String],
+    result_set: &kern::core::ResultSet,
+    selected_ciphers: &[Box<dyn Cipher>],
+    debug: bool,
+    show_length: bool,
+    show_total: bool,
+) {
+    let multi_cipher = selected_ciphers.len() > 1;
+    let mut items = Vec::new();
+
+    // Group results by input
+    let mut input_map: HashMap<String, Vec<&KernResult>> = HashMap::new();
+    for result in &result_set.results {
+        if matches!(result.step.operation, Operation::Reduce) {
+            input_map.entry(result.source.clone()).or_default().push(result);
+        }
+    }
+
+    // Build items in order of args
+    for arg in args {
+        if let Some(results) = input_map.get(arg) {
+            let length = if show_length { Some(arg.chars().count()) } else { None };
+
+            if multi_cipher {
+                // Multi-cipher mode: include ciphers array
+                let ciphers: Vec<CipherResult> = results
+                    .iter()
+                    .map(|r| {
+                        let descriptor = descriptors()
+                            .into_iter()
+                            .find(|d| d.name == r.cipher)
+                            .unwrap();
+
+                        CipherResult {
+                            name: descriptor.name.to_string(),
+                            code: descriptor.short.to_string(),
+                            value: r.value,
+                            chain: if debug { Some(r.trace.clone()) } else { None },
+                        }
+                    })
+                    .collect();
+
+                items.push(ReduceItem {
+                    input: arg.clone(),
+                    length,
+                    ciphers: Some(ciphers),
+                    value: None,
+                    chain: None,
+                });
+            } else {
+                // Single cipher mode: direct value and chain
+                if let Some(result) = results.first() {
+                    items.push(ReduceItem {
+                        input: arg.clone(),
+                        length,
+                        ciphers: None,
+                        value: Some(result.value),
+                        chain: if debug { Some(result.trace.clone()) } else { None },
+                    });
+                }
+            }
+        }
+    }
+
+    // Calculate total
+    let total = result_set.results
+        .iter()
+        .find(|r| matches!(r.step.operation, Operation::AggregateTotal))
+        .map(|r| r.value)
+        .unwrap_or(0);
+
+    let total_chain = if debug {
+        result_set.results
+            .iter()
+            .find(|r| matches!(r.step.operation, Operation::AggregateTotal))
+            .map(|r| r.trace.clone())
+    } else {
+        None
+    };
+
+    let response = ReduceResponse {
+        items: if !show_total { Some(items) } else { None },
+        total,
+        total_chain,
+    };
+
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
 fn build_cipher_alias_map(cipher_labels: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
 

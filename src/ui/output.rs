@@ -243,9 +243,15 @@ pub fn group_results_by_input<'a>(
 // ============================================================================
 
 /// Format and output SPEKTRA analysis prompt
-/// Copies to clipboard if available, otherwise prints to stdout
-pub fn format_spektra_output(prompt: &str) {
-    // Try to copy to clipboard if clipboard feature is enabled
+/// Copies to clipboard if available (TTY mode), or prints to stdout (pipe mode)
+pub fn format_spektra_output(prompt: &str, is_tty: bool) {
+    // If piped: always output full prompt (no clipboard)
+    if !is_tty {
+        println!("{}", prompt);
+        return;
+    }
+
+    // TTY behavior: try clipboard, fallback to print
     #[cfg(feature = "clipboard")]
     {
         match arboard::Clipboard::new() {
