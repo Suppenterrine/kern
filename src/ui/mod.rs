@@ -3,6 +3,7 @@
 //! This module provides consistent formatting across all output modes.
 //! Design principles: Fast, Direct, Concrete, Weighty, Precise
 
+pub mod matrix;
 pub mod output;
 pub mod theme;
 

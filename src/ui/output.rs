@@ -3,7 +3,8 @@
 //! All output formatting is centralized here for consistency.
 
 use super::*;
-use crate::core::{Bedeutung, Cipher, KernResult, PhaseRelationResult};
+use crate::core::{Bedeutung, Cipher, KernResult, PhaseRelationResult, PrmMatrixData};
+use crate::ui::matrix::render_prm_matrices;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -357,6 +358,27 @@ pub fn format_phase_relation_single(result: &PhaseRelationResult) {
     );
 }
 
+/// Format a phase description in German
+fn format_phase_description(
+    left_input: &str,
+    right_input: &str,
+    phase: i32,
+    left_compartment: u32,
+    right_compartment: u32,
+) -> String {
+    let phase_text = match phase {
+        0 => "Phase 0 (synchron)".to_string(),
+        1 => "Phase +1 (vorwärts)".to_string(),
+        -1 => "Phase -1 (rückwärts)".to_string(),
+        _ => format!("Phase {}", phase),
+    };
+
+    format!(
+        "{} und {} stehen in {} und bewegen sich von Abteil {} nach Abteil {}.",
+        left_input, right_input, phase_text, left_compartment, right_compartment
+    )
+}
+
 /// Format phase relation results, grouped by cipher
 pub fn format_phase_relation_results(
     results: &[PhaseRelationResult],
@@ -376,28 +398,97 @@ pub fn format_phase_relation_results(
             .push(result);
     }
 
-    // If only one cipher, show compact format with compartment viz
+    // If only one cipher, use new matrix visualization with improved formatting
     if ciphers.len() == 1 {
-        for result in results {
-            format_phase_relation_single(result);
-            println!();  // Blank line between pairs
+        // Generate matrix data to get abbreviations
+        if let Some(matrix_data) = PrmMatrixData::from_phase_results(results) {
+            // 1. Show colored abbreviations (first letters)
+            for (idx, input) in matrix_data.inputs.iter().enumerate() {
+                let first_letter = input.chars().next().unwrap_or('x').to_lowercase().to_string();
+
+                #[cfg(feature = "prm-colors")]
+                {
+                    use owo_colors::OwoColorize;
+                    let colors = &[
+                        owo_colors::AnsiColors::Red,
+                        owo_colors::AnsiColors::Blue,
+                        owo_colors::AnsiColors::Green,
+                        owo_colors::AnsiColors::Yellow,
+                        owo_colors::AnsiColors::Cyan,
+                        owo_colors::AnsiColors::Magenta,
+                        owo_colors::AnsiColors::BrightRed,
+                        owo_colors::AnsiColors::BrightMagenta,
+                        owo_colors::AnsiColors::BrightCyan,
+                    ];
+                    let color = colors[idx % colors.len()];
+                    print!("{} ", first_letter.color(color).bold());
+                }
+
+                #[cfg(not(feature = "prm-colors"))]
+                {
+                    print!("{} ", first_letter);
+                }
+            }
+            println!("\n");
+
+            // 2. Show input words with their values
+            for (idx, input) in matrix_data.inputs.iter().enumerate() {
+                println!("{}: {}", input, matrix_data.values[idx]);
+            }
+            println!();
+
+            // 3. Show phase descriptions (dezent)
+            for result in results {
+                let desc = format_phase_description(
+                    &result.left_input,
+                    &result.right_input,
+                    result.phase,
+                    result.left_compartment,
+                    result.right_compartment,
+                );
+                println!("{}", desc);
+            }
+            println!();
+
+            // 4. Show matrix
+            let matrix_output = render_prm_matrices(&matrix_data);
+            print!("{}", matrix_output);
         }
+
         return;
     }
 
-    // Multiple ciphers: group by cipher
+    // Multiple ciphers: group by cipher with matrix for each
     for cipher in ciphers {
         let cipher_name = cipher.name();
         if let Some(cipher_results) = by_cipher.get(cipher_name) {
             println!("[{}]", cipher_name);
+
+            // Show phase relations
             for result in cipher_results {
                 println!(
-                    "{}{}+{} = {}",
+                    "{}{}({})+{}({}) = {} ({}→{})",
                     INDENT_BASE,
                     result.left_input,
+                    result.left_value,
                     result.right_input,
-                    format_phase(result.phase)
+                    result.right_value,
+                    format_phase(result.phase),
+                    result.left_compartment,
+                    result.right_compartment
                 );
+            }
+            println!();
+
+            // Show matrix for this cipher
+            // Convert &Vec<&PhaseRelationResult> to Vec<PhaseRelationResult>
+            let owned_results: Vec<PhaseRelationResult> = cipher_results.iter().map(|r| (*r).clone()).collect();
+            if let Some(matrix_data) = PrmMatrixData::from_phase_results(&owned_results) {
+                let matrix_output = render_prm_matrices(&matrix_data);
+                // Indent matrix output for grouped display
+                for line in matrix_output.lines() {
+                    println!("{}{}", INDENT_BASE, line);
+                }
             }
             println!();
         }

@@ -42,7 +42,7 @@ pub mod core {
     };
 
     pub use phase::{
-        PhaseRelationResult, calculate_compartment, calculate_phase, generate_matrix_pairs,
+        PhaseRelationResult, PrmMatrixData, calculate_compartment, calculate_phase, generate_matrix_pairs,
     };
 
     use utils::char_to_value_ordinal;

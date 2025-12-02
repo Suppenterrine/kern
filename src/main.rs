@@ -610,6 +610,7 @@ fn main() {
                 let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
                 if let Some(data) = payload {
                     #[derive(Deserialize)]
+                    #[allow(dead_code)]
                     struct LookupEntry {
                         value: u32,
                         sources: Vec<String>,

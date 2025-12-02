@@ -144,6 +144,84 @@ impl PhaseRelationResult {
     }
 }
 
+/// Data structure for PRM matrix visualization
+#[derive(Debug, Clone)]
+pub struct PrmMatrixData {
+    /// Original input words
+    pub inputs: Vec<String>,
+    /// Generated abbreviations (e.g., "z1", "w2")
+    pub abbreviations: Vec<String>,
+    /// Compartment for each input (1-3)
+    pub compartments: Vec<u32>,
+    /// Reduced values for each input
+    pub values: Vec<u32>,
+    /// Cipher name
+    pub cipher: String,
+}
+
+impl PrmMatrixData {
+    /// Create a new PrmMatrixData from phase relation results
+    pub fn from_phase_results(results: &[PhaseRelationResult]) -> Option<Self> {
+        if results.is_empty() {
+            return None;
+        }
+
+        // Extract unique inputs in order
+        let mut inputs = Vec::new();
+        let mut values = Vec::new();
+        let mut compartments = Vec::new();
+
+        // Use the first result to get cipher
+        let cipher = results[0].cipher.clone();
+
+        // Collect all unique inputs from results
+        for result in results {
+            if !inputs.contains(&result.left_input) {
+                inputs.push(result.left_input.clone());
+                values.push(result.left_value);
+                compartments.push(result.left_compartment);
+            }
+            if !inputs.contains(&result.right_input) {
+                inputs.push(result.right_input.clone());
+                values.push(result.right_value);
+                compartments.push(result.right_compartment);
+            }
+        }
+
+        // Generate abbreviations
+        let abbreviations = generate_abbreviations(&inputs);
+
+        Some(Self {
+            inputs,
+            abbreviations,
+            compartments,
+            values,
+            cipher,
+        })
+    }
+}
+
+/// Generate abbreviations from input words
+/// Format: First character + sequential number (e.g., "z1", "w2", "z3")
+fn generate_abbreviations(inputs: &[String]) -> Vec<String> {
+    let mut abbrevs = Vec::new();
+    let mut counter = 1;
+
+    for input in inputs {
+        let first_char = input
+            .chars()
+            .next()
+            .unwrap_or('x')
+            .to_lowercase()
+            .to_string();
+
+        abbrevs.push(format!("{}{}", first_char, counter));
+        counter += 1;
+    }
+
+    abbrevs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
