@@ -48,6 +48,7 @@ async fn root_handler() -> Json<ApiOverview> {
     examples.insert("reduce_cipher", "/reduce?input=Test&cipher=ord,py");
     examples.insert("reduce_all_ciphers", "/reduce?input=Test&cipher=all");
     examples.insert("lookup_single", "/lookup/7?parts=full");
+    examples.insert("lookup_all", "/lookup");
     examples.insert("lookup_multi", "/lookup?numbers=1,7,11&parts=full");
     examples.insert("date_range", "/date?range=0..7&debug=true");
     examples.insert("spektra", "/spektra?word=Love");
@@ -419,8 +420,8 @@ async fn lookup_handler(
 
 #[derive(Deserialize)]
 struct LookupParams {
-    numbers: String,
-    parts: Option<String>, // optional: "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
+    numbers: Option<String>, // optional: if omitted, returns all meanings
+    parts: Option<String>,   // optional: "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
 }
 
 #[derive(Serialize)]
@@ -449,30 +450,47 @@ async fn lookup_multi_handler(
     let want_positive = matches!(sel, Some("pos") | Some("light") | Some("both") | Some("full"));
     let want_negative = matches!(sel, Some("neg") | Some("shadow") | Some("both") | Some("full"));
 
-    for part in params.numbers.split(',') {
-        let s = part.trim();
-        if s.is_empty() {
-            continue;
-        }
-        if let Ok(n) = s.parse::<u32>() {
+    // If no numbers parameter provided, return all meanings (base description only)
+    if params.numbers.is_none() || params.numbers.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        let mut all_numbers: Vec<u32> = state.map.keys().copied().collect();
+        all_numbers.sort();
+
+        for n in all_numbers {
             let meaning = lookup(n, &state.map).to_string();
-            let entry = state.map.get(&n);
-            let positive = if want_positive {
-                entry.and_then(|b| b.licht.clone())
-            } else {
-                None
-            };
-            let negative = if want_negative {
-                entry.and_then(|b| b.schatten.clone())
-            } else {
-                None
-            };
             items.push(LookupItem {
                 number: n,
                 meaning,
-                positive,
-                negative,
+                positive: None,
+                negative: None,
             });
+        }
+    } else {
+        // Parse specific numbers from parameter
+        for part in params.numbers.as_ref().unwrap().split(',') {
+            let s = part.trim();
+            if s.is_empty() {
+                continue;
+            }
+            if let Ok(n) = s.parse::<u32>() {
+                let meaning = lookup(n, &state.map).to_string();
+                let entry = state.map.get(&n);
+                let positive = if want_positive {
+                    entry.and_then(|b| b.licht.clone())
+                } else {
+                    None
+                };
+                let negative = if want_negative {
+                    entry.and_then(|b| b.schatten.clone())
+                } else {
+                    None
+                };
+                items.push(LookupItem {
+                    number: n,
+                    meaning,
+                    positive,
+                    negative,
+                });
+            }
         }
     }
     Json(LookupListResponse { items })
