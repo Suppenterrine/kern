@@ -225,6 +225,12 @@ fn main() {
                 .help("Generate SPEKTRA analysis prompt (uses all ciphers automatically)"),
         )
         .arg(
+            Arg::new("rtap")
+                .long("rtap")
+                .value_name("PART")
+                .help("Show RTAP (Rethinking Thoughts And Positions) prompt. Values: 1 or 2"),
+        )
+        .arg(
             Arg::new("phase-relation-matrix")
                 .long("phase-relation-matrix")
                 .visible_alias("prm")
@@ -518,6 +524,39 @@ fn main() {
         return;
     }
 
+    /* --rtap Flag gesetzt? -------------------------------------------- */
+
+    if let Some(rtap_part) = matches.get_one::<String>("rtap") {
+        let part_num = match rtap_part.parse::<u8>() {
+            Ok(1) | Ok(2) => rtap_part.parse::<u8>().unwrap(),
+            _ => {
+                output_error(
+                    &format!("Invalid RTAP part number: {}. Must be 1 or 2", rtap_part),
+                    is_tty
+                );
+            }
+        };
+
+        let prompts = kern::core::load_rtap_prompts();
+
+        match kern::core::get_rtap_prompt(part_num, &prompts) {
+            Some(prompt) => {
+                if is_tty {
+                    println!("{}", prompt);
+                } else {
+                    output_rtap_json(prompt, part_num);
+                }
+            }
+            None => {
+                output_error(
+                    &format!("RTAP prompt {} not found in configuration", part_num),
+                    is_tty
+                );
+            }
+        }
+        return;
+    }
+
     /* --length Flag gesetzt? -------------------------------------------- */
 
     if let Some(args_values) = matches.get_many::<String>("ARGS") {
@@ -796,6 +835,24 @@ fn output_spektra_json(word: &str, prompt: &str) {
         word: word.to_string(),
         prompt: prompt.to_string(),
     };
+    if let Ok(json) = serde_json::to_string(&response) {
+        println!("{}", json);
+    }
+}
+
+/// Output RTAP response as JSON
+fn output_rtap_json(prompt: &str, part: u8) {
+    #[derive(Serialize)]
+    struct RtapResponse {
+        prompt: String,
+        part: u8,
+    }
+
+    let response = RtapResponse {
+        prompt: prompt.to_string(),
+        part,
+    };
+
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
     }

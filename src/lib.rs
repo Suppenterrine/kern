@@ -221,8 +221,53 @@ pub mod core {
     pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
         // Datei wird zur Compilezeit als String eingebettet
         let yaml_str = include_str!("../bedeutungen.yaml");
-        serde_yaml::from_str(yaml_str)
-            .expect("Eingebettete bedeutungen.yaml konnte nicht geparst werden")
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
+            .expect("Failed to parse bedeutungen.yaml");
+
+        let mut bedeutungen = HashMap::new();
+
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (key, val) in map {
+                // Only parse entries with numeric keys
+                if let serde_yaml::Value::Number(num) = key {
+                    if let Some(num_u64) = num.as_u64() {
+                        let num_u32 = num_u64 as u32;
+                        if let Ok(bedeutung) = serde_yaml::from_value::<Bedeutung>(val) {
+                            bedeutungen.insert(num_u32, bedeutung);
+                        }
+                    }
+                }
+            }
+        }
+
+        bedeutungen
+    }
+
+    /// Load RTAP prompts from embedded bedeutungen.yaml
+    pub fn load_rtap_prompts() -> HashMap<String, String> {
+        let yaml_str = include_str!("../bedeutungen.yaml");
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
+            .expect("Failed to parse bedeutungen.yaml");
+
+        let mut prompts = HashMap::new();
+
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (key, val) in map {
+                if let (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) = (key, val) {
+                    if k.starts_with("rtap_") {
+                        prompts.insert(k, v);
+                    }
+                }
+            }
+        }
+
+        prompts
+    }
+
+    /// Get RTAP prompt by part number (1 or 2)
+    pub fn get_rtap_prompt(part: u8, prompts: &HashMap<String, String>) -> Option<&str> {
+        let key = format!("rtap_{}", part);
+        prompts.get(&key).map(|s| s.as_str())
     }
 
     pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
