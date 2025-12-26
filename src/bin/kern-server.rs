@@ -54,6 +54,8 @@ async fn root_handler() -> Json<ApiOverview> {
     examples.insert("spektra", "/spektra?word=Love");
     examples.insert("phase_simple", "/phase?inputs=a,b");
     examples.insert("phase_multi", "/phase?inputs=a,b,c&cipher=all");
+    examples.insert("rtap_single", "/rtap?part=1");
+    examples.insert("rtap_both", "/rtap?part=both");
 
     Json(ApiOverview {
         name: "KERN API",
@@ -98,6 +100,11 @@ async fn root_handler() -> Json<ApiOverview> {
                 path: "/phase",
                 method: "GET",
                 description: "Calculate phase relation matrix for multiple inputs",
+            },
+            EndpointInfo {
+                path: "/rtap",
+                method: "GET",
+                description: "Get RTAP (Rethinking Thoughts And Positions) prompts",
             },
         ],
         examples,
@@ -653,6 +660,26 @@ struct PhaseResponse {
     relations: Vec<PhaseRelationItem>,
 }
 
+// ============================================================================
+// RTAP Endpoint
+// ============================================================================
+
+#[derive(Deserialize)]
+struct RtapParams {
+    part: Option<String>, // "1", "2", or "both"
+}
+
+#[derive(Serialize)]
+struct RtapResponse {
+    prompt: String,
+    part: u8,
+}
+
+#[derive(Serialize)]
+struct RtapBothResponse {
+    prompts: Vec<RtapResponse>,
+}
+
 async fn phase_handler(
     Query(params): Query<PhaseParams>,
 ) -> Result<Json<PhaseResponse>, (StatusCode, Json<ErrorResponse>)> {
@@ -759,6 +786,74 @@ async fn phase_handler(
     Ok(Json(PhaseResponse { relations }))
 }
 
+async fn rtap_handler(
+    Query(params): Query<RtapParams>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let prompts = kern::core::load_rtap_prompts();
+
+    let part_str = params.part.as_deref().unwrap_or("1");
+
+    if part_str.eq_ignore_ascii_case("both") {
+        let mut results = Vec::new();
+
+        for part_num in [1u8, 2u8] {
+            match kern::core::get_rtap_prompt(part_num, &prompts) {
+                Some(prompt) => {
+                    results.push(RtapResponse {
+                        prompt: prompt.to_string(),
+                        part: part_num,
+                    });
+                }
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ErrorResponse {
+                            error: format!("RTAP prompt {} not found", part_num),
+                        }),
+                    ));
+                }
+            }
+        }
+
+        let response = RtapBothResponse { prompts: results };
+        Ok(Json(serde_json::to_value(response).unwrap()))
+    } else {
+        let part_num = part_str.parse::<u8>().map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Invalid part number: {}. Must be 1, 2, or 'both'", part_str),
+                }),
+            )
+        })?;
+
+        if part_num != 1 && part_num != 2 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!("Invalid part number: {}. Must be 1 or 2", part_num),
+                }),
+            ));
+        }
+
+        match kern::core::get_rtap_prompt(part_num, &prompts) {
+            Some(prompt) => {
+                let response = RtapResponse {
+                    prompt: prompt.to_string(),
+                    part: part_num,
+                };
+                Ok(Json(serde_json::to_value(response).unwrap()))
+            }
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: format!("RTAP prompt {} not found in configuration", part_num),
+                }),
+            )),
+        }
+    }
+}
+
 // ============================================================================
 // Main Server Setup
 // ============================================================================
@@ -777,6 +872,7 @@ async fn main() {
         .route("/date", get(date_handler))
         .route("/spektra", get(spektra_handler))
         .route("/phase", get(phase_handler))
+        .route("/rtap", get(rtap_handler))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
