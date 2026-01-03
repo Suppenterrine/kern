@@ -1,0 +1,240 @@
+openapi: 3.0.0
+
+info:
+  title: KERN API
+  version: 1.0.0
+  description: |
+    The KERN API provides numerology analysis and helper endpoints
+    for working with text, numbers, dates, and symbolic structures.
+    It also includes endpoints designed for LLM prompt generation.
+
+servers:
+  - url: https://kern.drehraum.wtf
+
+paths:
+
+  /:
+    get:
+      summary: API root
+      description: API overview and basic information.
+      responses:
+        '200':
+          description: Root response
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /version:
+    get:
+      summary: API version
+      description: Returns version information.
+      responses:
+        '200':
+          description: Version response
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /reduce:
+    get:
+      summary: Reduce text to numerology values
+      description: |
+        Reduces text input into numerological values.
+        Supports multiple inputs, ciphers, and debug output.
+      parameters:
+        - name: input
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of input strings.
+        - name: cipher
+          in: query
+          schema:
+            type: string
+          description: Cipher(s) to use (e.g. ord, py, all).
+        - name: debug
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Reduction result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultsResponse'
+
+  /lookup:
+    get:
+      summary: Lookup multiple numbers
+      description: Returns meanings for multiple numerology numbers.
+      parameters:
+        - name: numbers
+          in: query
+          schema:
+            type: string
+          description: Comma-separated list of numbers.
+        - name: parts
+          in: query
+          schema:
+            type: string
+          description: Level of detail to return.
+      responses:
+        '200':
+          description: Lookup results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultsResponse'
+
+  /lookup/{number}:
+    get:
+      summary: Lookup single number
+      description: Returns meaning for a single numerology number.
+      parameters:
+        - name: number
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: parts
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lookup result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LookupResponse'
+
+  /date:
+    get:
+      summary: Analyze date range
+      description: Performs numerological analysis on a date range.
+      parameters:
+        - name: range
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Date or range (e.g. 0..7).
+        - name: debug
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Date analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /spektra:
+    get:
+      summary: Spectral analysis
+      description: Multi-cipher spectral analysis for LLM prompt generation.
+      parameters:
+        - name: word
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Spectral analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpectrumResponse'
+
+  /phase:
+    get:
+      summary: Phase relation matrix
+      description: Calculates phase relations between multiple inputs.
+      parameters:
+        - name: inputs
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Comma-separated list of inputs.
+        - name: cipher
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Phase matrix result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MatrixResponse'
+
+  /rtap:
+    get:
+      summary: RTAP prompts
+      description: Returns RTAP (Rethinking Thoughts And Positions) prompts.
+      parameters:
+        - name: part
+          in: query
+          schema:
+            type: string
+          description: Prompt part (single index or "both").
+      responses:
+        '200':
+          description: RTAP prompts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromptsResponse'
+
+components:
+  schemas:
+
+    ResultsResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+
+    LookupResponse:
+      type: object
+      properties:
+        number:
+          type: integer
+        meaning:
+          type: object
+
+    SpectrumResponse:
+      type: object
+      properties:
+        spectrum:
+          type: array
+          items:
+            type: object
+
+    MatrixResponse:
+      type: object
+      properties:
+        matrix:
+          type: array
+          items:
+            type: array
+            items:
+              type: object
+
+    PromptsResponse:
+      type: object
+      properties:
+        prompts:
+          type: array
+          items:
+            type: string
