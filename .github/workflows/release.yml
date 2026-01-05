@@ -47,6 +47,9 @@ jobs:
     if: contains(github.event.release.body, '[SERVER]')
     needs: build-win
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -73,19 +76,20 @@ jobs:
           files: target/release/kern-server
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Login to DockerHub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Push Docker Image
+      - name: Build & Push Docker Image to GHCR
         run: |
           docker build \
             --build-arg BUILD_BIN=kern-server \
-            -t ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }} \
-            -t ${{ secrets.DOCKER_USERNAME }}/kern-server:latest \
+            -t ghcr.io/${{ github.repository_owner }}/kern-server:${{ github.ref_name }} \
+            -t ghcr.io/${{ github.repository_owner }}/kern-server:latest \
             .
-          docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:${{ github.ref_name }}
-          docker push ${{ secrets.DOCKER_USERNAME }}/kern-server:latest
-        # Note: Watchtower on the server will automatically pull and deploy the latest image
+          docker push ghcr.io/${{ github.repository_owner }}/kern-server:${{ github.ref_name }}
+          docker push ghcr.io/${{ github.repository_owner }}/kern-server:latest
+        # Note: Image is now on ghcr.io/suppenterrine/kern-server
