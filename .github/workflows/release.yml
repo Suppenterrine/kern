@@ -85,11 +85,12 @@ jobs:
 
       - name: Build & Push Docker Image to GHCR
         run: |
+          REPO_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           docker build \
             --build-arg BUILD_BIN=kern-server \
-            -t ghcr.io/${{ github.repository_owner }}/kern-server:${{ github.ref_name }} \
-            -t ghcr.io/${{ github.repository_owner }}/kern-server:latest \
+            -t ghcr.io/${REPO_OWNER_LC}/kern-server:${{ github.ref_name }} \
+            -t ghcr.io/${REPO_OWNER_LC}/kern-server:latest \
             .
-          docker push ghcr.io/${{ github.repository_owner }}/kern-server:${{ github.ref_name }}
-          docker push ghcr.io/${{ github.repository_owner }}/kern-server:latest
+          docker push ghcr.io/${REPO_OWNER_LC}/kern-server:${{ github.ref_name }}
+          docker push ghcr.io/${REPO_OWNER_LC}/kern-server:latest
         # Note: Image is now on ghcr.io/suppenterrine/kern-server
