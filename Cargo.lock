@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "kern"
-version = "0.1.5"
+version = "1.2.0"
 dependencies = [
  "arboard",
  "axum",
@@ -2346,7 +2346,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.1.5"
+version = "1.2.0"
 dependencies = [
  "regex",
 ]

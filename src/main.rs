@@ -130,6 +130,26 @@ struct SpektraResponse {
     prompt: String,
 }
 
+/// Single alphabet-index entry (letter -> position, A=1)
+#[derive(Serialize)]
+struct IndexEntry {
+    letter: String,
+    index: u32,
+}
+
+/// Alphabet-index response for a single input
+#[derive(Serialize)]
+struct IndexResponse {
+    input: String,
+    entries: Vec<IndexEntry>,
+}
+
+/// Alphabet-index response for multiple inputs (piped/JSON mode)
+#[derive(Serialize)]
+struct IndexListResponse {
+    items: Vec<IndexResponse>,
+}
+
 // ============================================================================
 // Main Entry Point
 // ============================================================================
@@ -146,6 +166,17 @@ fn main() {
     let matches = Command::new("kern")
         .version(env!("CARGO_PKG_VERSION"))
         .about(about)
+        .arg(
+            Arg::new("index")
+                .short('i')
+                .long("index")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Shows the alphabet position of each letter (A=1, B=2, ...). \
+                     Cipher-independent pure lookup, special characters are skipped, \
+                     duplicate letters are deduplicated. Example: kern -i kassel",
+                ),
+        )
         .arg(
             Arg::new("lookup")
                 .short('l')
@@ -258,6 +289,50 @@ fn main() {
     let show_full = matches.get_flag("full");
     let show_spektra = matches.get_flag("spektra");
     let show_pmr = matches.get_flag("phase-relation-matrix");
+    let show_index = matches.get_flag("index");
+
+    // --index: dedicated alphabet-position lookup, independent of any cipher
+    if show_index {
+        match matches.get_many::<String>("ARGS") {
+            Some(values) => {
+                let inputs: Vec<String> =
+                    values.map(|s| s.to_string()).collect();
+                if inputs.is_empty() {
+                    output_error("index requires at least one input", is_tty);
+                }
+                let mut json_items = Vec::new();
+                for input in &inputs {
+                    let entries = kern::core::alphabet_index(input);
+                    if !is_tty {
+                        json_items.push(IndexResponse {
+                            input: input.clone(),
+                            entries: entries
+                                .iter()
+                                .map(|(ch, idx)| IndexEntry {
+                                    letter: ch.to_string(),
+                                    index: *idx,
+                                })
+                                .collect(),
+                        });
+                    } else {
+                        let parts: Vec<String> = entries
+                            .iter()
+                            .map(|(ch, idx)| format!("{ch}={idx}"))
+                            .collect();
+                        println!("{} {} {}", input, ui::ARROW_RIGHT, parts.join(" "));
+                    }
+                }
+                if !is_tty {
+                    let response = IndexListResponse { items: json_items };
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        println!("{}", json);
+                    }
+                }
+            }
+            None => output_error("index requires at least one input", is_tty),
+        }
+        return;
+    }
 
     if matches.get_flag("list-ciphers") {
         let cipher_list: Vec<(String, String, String)> = descriptors()

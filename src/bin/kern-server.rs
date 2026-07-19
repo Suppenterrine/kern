@@ -7,8 +7,8 @@ use axum::{
 use chrono::{Duration, Local};
 use kern::core::{
     Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
-    StepMetadata, descriptors, generate_matrix_pairs, load_bedeutungen, lookup, parse_range,
-    reduce_number_steps, reduce_number_verbose,
+    StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_bedeutungen, lookup,
+    parse_range, reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -56,6 +56,8 @@ async fn root_handler() -> Json<ApiOverview> {
     examples.insert("phase_multi", "/phase?inputs=a,b,c&cipher=all");
     examples.insert("rtap_single", "/rtap?part=1");
     examples.insert("rtap_both", "/rtap?part=both");
+    examples.insert("index_single", "/index?input=kassel");
+    examples.insert("index_multi", "/index?input=Wickfeld,Love");
 
     Json(ApiOverview {
         name: "KERN API",
@@ -105,6 +107,13 @@ async fn root_handler() -> Json<ApiOverview> {
                 path: "/rtap",
                 method: "GET",
                 description: "Get RTAP (Rethinking Thoughts And Positions) prompts",
+            },
+            EndpointInfo {
+                path: "/index",
+                method: "GET",
+                description:
+                    "Alphabet-position lookup (A=1, B=2, ...). Cipher-independent, special \
+                     characters skipped, duplicate letters deduplicated.",
             },
         ],
         examples,
@@ -504,6 +513,66 @@ async fn lookup_multi_handler(
 }
 
 // ============================================================================
+// Alphabet Index Endpoint
+// ============================================================================
+
+#[derive(Deserialize)]
+struct IndexParams {
+    input: Option<String>, // comma-separated words; letters mapped to A=1, B=2, ...
+}
+
+#[derive(Serialize)]
+struct IndexEntry {
+    letter: String,
+    index: u32,
+}
+
+#[derive(Serialize)]
+struct IndexItem {
+    input: String,
+    entries: Vec<IndexEntry>,
+}
+
+#[derive(Serialize)]
+struct IndexListResponse {
+    items: Vec<IndexItem>,
+}
+
+async fn index_handler(
+    Query(params): Query<IndexParams>,
+) -> Result<Json<IndexListResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let input = params
+        .input
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "input parameter missing".into(),
+                }),
+            )
+        })?;
+
+    let mut items = Vec::new();
+    for word in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let entries: Vec<IndexEntry> = alphabet_index(word)
+            .into_iter()
+            .map(|(ch, idx)| IndexEntry {
+                letter: ch.to_string(),
+                index: idx,
+            })
+            .collect();
+        items.push(IndexItem {
+            input: word.to_string(),
+            entries,
+        });
+    }
+
+    Ok(Json(IndexListResponse { items }))
+}
+
+// ============================================================================
 // Date Endpoint
 // ============================================================================
 
@@ -873,6 +942,7 @@ async fn main() {
         .route("/spektra", get(spektra_handler))
         .route("/phase", get(phase_handler))
         .route("/rtap", get(rtap_handler))
+        .route("/index", get(index_handler))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

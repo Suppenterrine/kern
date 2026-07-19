@@ -218,6 +218,56 @@ pub mod core {
         char_to_value_ordinal(ch)
     }
 
+    /// Pure alphabet-position lookup. Cipher-independent: a letter always maps
+    /// to its human counting position (A=1, B=2, ...). Special characters and
+    /// digits are skipped, matching the program's established behaviour
+    /// (`normalize_char` only accepts ascii letters). The result is
+    /// deduplicated — each letter appears once, in first-seen order.
+    pub fn alphabet_index(input: &str) -> Vec<(char, u32)> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for ch in input.chars() {
+            if !ch.is_ascii_alphabetic() {
+                continue;
+            }
+            let c = ch.to_ascii_uppercase();
+            if seen.insert(c) {
+                let idx = (c as u32) - ('A' as u32) + 1;
+                out.push((c, idx));
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn alphabet_index_is_one_based() {
+            assert_eq!(alphabet_index("A"), vec![('A', 1)]);
+            assert_eq!(alphabet_index("Z"), vec![('Z', 26)]);
+        }
+
+        #[test]
+        fn alphabet_index_skips_special_chars() {
+            assert_eq!(alphabet_index("a-b!c"), vec![('A', 1), ('B', 2), ('C', 3)]);
+        }
+
+        #[test]
+        fn alphabet_index_dedupes() {
+            assert_eq!(
+                alphabet_index("kassel"),
+                vec![('K', 11), ('A', 1), ('S', 19), ('E', 5), ('L', 12)]
+            );
+        }
+
+        #[test]
+        fn alphabet_index_case_insensitive() {
+            assert_eq!(alphabet_index("AbC"), vec![('A', 1), ('B', 2), ('C', 3)]);
+        }
+    }
+
     pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
         // Datei wird zur Compilezeit als String eingebettet
         let yaml_str = include_str!("../bedeutungen.yaml");
