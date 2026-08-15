@@ -1,8 +1,9 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepMetadata,
-    default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen, parse_range,
+    Cipher, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline, Step, StepMetadata,
+    ErrorCode, default_cipher, descriptors, generate_matrix_pairs, get_cipher,
+    load_bedeutungen_lang, parse_range,
 };
 use kern::ui;
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,7 @@ impl OutputMode {
 /// Error response for JSON mode
 #[derive(Serialize)]
 struct ErrorResponse {
+    code: ErrorCode,
     error: String,
 }
 
@@ -70,6 +72,16 @@ struct ReduceResponse {
     total_chain: Option<Vec<String>>,
 }
 
+/// One entry of a Lookup step's payload: the reduced value plus the inputs that
+/// produced it. The Lookup `KernResult` itself carries no value (`value` is 0)
+/// — the actual data lives in its JSON payload, so it must always be read from
+/// here rather than from `KernResult::value`.
+#[derive(Deserialize)]
+struct LookupEntry {
+    value: u32,
+    sources: Vec<String>,
+}
+
 /// Lookup response for a single number
 #[derive(Serialize)]
 struct LookupResponse {
@@ -84,6 +96,7 @@ struct LookupResponse {
 /// Lookup mode response (multiple numbers)
 #[derive(Serialize)]
 struct LookupListResponse {
+    lang: &'static str,
     items: Vec<LookupResponse>,
 }
 
@@ -101,6 +114,7 @@ struct DateItem {
 /// Date mode response
 #[derive(Serialize)]
 struct DateResponse {
+    lang: &'static str,
     dates: Vec<DateItem>,
 }
 
@@ -203,6 +217,18 @@ fn main() {
                 .help("Shows complete meaning including positive and negative aspects"),
         )
         .arg(
+            Arg::new("lang")
+                .long("lang")
+                .value_name("CODE")
+                .num_args(1)
+                .help(
+                    "Content language: en (default), de, fr. Meanings exist in all three; \
+                     SPEKTRA and RTAP prompts only in en and de, and an unavailable \
+                     language is rejected rather than substituted. \
+                     Calculations are language independent",
+                ),
+        )
+        .arg(
             Arg::new("cipher")
                 .long("cipher")
                 .value_name("CIPHER")
@@ -291,6 +317,16 @@ fn main() {
     let show_pmr = matches.get_flag("phase-relation-matrix");
     let show_index = matches.get_flag("index");
 
+    // Meanings language. An unknown code aborts instead of silently falling
+    // back, mirroring the server's 400 response.
+    let lang = match matches.get_one::<String>("lang") {
+        Some(raw) => match raw.parse::<Lang>() {
+            Ok(lang) => lang,
+            Err(msg) => output_error(ErrorCode::UnsupportedLanguage, &msg, is_tty),
+        },
+        None => Lang::default(),
+    };
+
     // --index: dedicated alphabet-position lookup, independent of any cipher
     if show_index {
         match matches.get_many::<String>("ARGS") {
@@ -298,7 +334,7 @@ fn main() {
                 let inputs: Vec<String> =
                     values.map(|s| s.to_string()).collect();
                 if inputs.is_empty() {
-                    output_error("index requires at least one input", is_tty);
+                    output_error(ErrorCode::InputMissing, "index requires at least one input", is_tty);
                 }
                 let mut json_items = Vec::new();
                 for input in &inputs {
@@ -329,7 +365,7 @@ fn main() {
                     }
                 }
             }
-            None => output_error("index requires at least one input", is_tty),
+            None => output_error(ErrorCode::InputMissing, "index requires at least one input", is_tty),
         }
         return;
     }
@@ -361,7 +397,8 @@ fn main() {
                             .map(|d| format!("{} ({})", d.name, d.short))
                             .collect();
                         output_error(
-                            &format!("Unknown cipher: {}. Available: {}", value, available.join(", ")),
+                            ErrorCode::UnknownCipher,
+                            &format!("unknown cipher: {}. available: {}", value, available.join(", ")),
                             is_tty,
                         );
                     }
@@ -431,8 +468,15 @@ fn main() {
                         .map(|row| row.first().copied().flatten())
                         .collect();
 
-                    let bedeutungen = load_bedeutungen();
-                    output_date_json(&offsets, &formatted_dates, &flat_results, &bedeutungen, debug);
+                    let bedeutungen = load_bedeutungen_lang(lang);
+                    output_date_json(
+                        &offsets,
+                        &formatted_dates,
+                        &flat_results,
+                        &bedeutungen,
+                        lang,
+                        debug,
+                    );
                     return;
                 }
 
@@ -482,12 +526,6 @@ fn main() {
 
                 // Handle lookup if requested
                 if show_lookup {
-                    #[derive(Deserialize)]
-                    struct LookupEntry {
-                        value: u32,
-                        sources: Vec<String>,
-                    }
-
                     let lookup_results: Vec<&KernResult> = result_set
                         .iter()
                         .filter(|r| matches!(r.step.operation, Operation::Lookup))
@@ -498,7 +536,7 @@ fn main() {
                     match payload {
                         Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
                             Ok(entries) if !entries.is_empty() => {
-                                let bedeutungen = load_bedeutungen();
+                                let bedeutungen = load_bedeutungen_lang(lang);
 
                                 ui::spacing(ui::SPACING_MODE);
 
@@ -525,7 +563,7 @@ fn main() {
                     }
                 }
             }
-            Err(e) => output_error(&e, is_tty),
+            Err(e) => output_error(ErrorCode::InvalidRange, &e, is_tty),
         }
         return; // Date processing complete, exit early
     }
@@ -537,7 +575,7 @@ fn main() {
             let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
             
             if raw_tokens.is_empty() {
-                output_error("--spektra requires a word argument", is_tty);
+                output_error(ErrorCode::WordMissing, "--spektra requires a word argument", is_tty);
             }
 
             // Only use the first word for spektra analysis
@@ -579,11 +617,27 @@ fn main() {
                 .cloned()
                 .collect();
 
-            // Load meanings
-            let bedeutungen = load_bedeutungen();
+            // The SPEKTRA prompt exists in German and English only. No silent
+            // substitution — an unavailable language aborts.
+            if !lang.has_prompts() {
+                output_error(
+                    ErrorCode::LanguageNotAvailable,
+                    &format!(
+                        "SPEKTRA prompt is not available in '{lang}'. available: {}",
+                        Lang::prompt_langs()
+                    ),
+                    is_tty,
+                );
+            }
+            let bedeutungen = load_bedeutungen_lang(lang);
 
             // Build spektra prompt
-            match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &bedeutungen) {
+            match kern::core::spektra::build_spektra_prompt(
+                word,
+                &reduce_results,
+                &bedeutungen,
+                lang,
+            ) {
                 Ok(prompt) => {
                     if is_tty {
                         ui::output::format_spektra_output(&prompt, is_tty);
@@ -592,7 +646,7 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    output_error(&format!("Error building spektra prompt: {}", e), is_tty);
+                    output_error(ErrorCode::SpektraFailed, &format!("error building spektra prompt: {e}"), is_tty);
                 }
             }
         }
@@ -606,13 +660,25 @@ fn main() {
             Ok(1) | Ok(2) => rtap_part.parse::<u8>().unwrap(),
             _ => {
                 output_error(
-                    &format!("Invalid RTAP part number: {}. Must be 1 or 2", rtap_part),
-                    is_tty
+                    ErrorCode::InvalidRtapPart,
+                    &format!("invalid part number: {rtap_part}. must be 1 or 2"),
+                    is_tty,
                 );
             }
         };
 
-        let prompts = kern::core::load_rtap_prompts();
+        // No silent substitution: a language without RTAP prompts aborts.
+        let prompts = match kern::core::load_rtap_prompts_lang(lang) {
+            Some(prompts) => prompts,
+            None => output_error(
+                ErrorCode::LanguageNotAvailable,
+                &format!(
+                    "RTAP prompts are not available in '{lang}'. available: {}",
+                    Lang::prompt_langs()
+                ),
+                is_tty,
+            ),
+        };
 
         match kern::core::get_rtap_prompt(part_num, &prompts) {
             Some(prompt) => {
@@ -624,8 +690,9 @@ fn main() {
             }
             None => {
                 output_error(
-                    &format!("RTAP prompt {} not found in configuration", part_num),
-                    is_tty
+                    ErrorCode::RtapPromptMissing,
+                    &format!("RTAP prompt {part_num} not found in configuration"),
+                    is_tty,
                 );
             }
         }
@@ -639,8 +706,8 @@ fn main() {
 
         let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map, show_pmr) {
             Ok(data) => data,
-            Err(err) => {
-                output_error(&err, is_tty);
+            Err((code, err)) => {
+                output_error(code, &err, is_tty);
             }
         };
 
@@ -723,16 +790,17 @@ fn main() {
                 // Lookup mode: only output lookup results
                 let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
                 if let Some(data) = payload {
-                    #[derive(Deserialize)]
-                    struct LookupEntry {
-                        value: u32,
-                        sources: Vec<String>,
-                    }
                     if let Ok(entries) = serde_json::from_str::<Vec<LookupEntry>>(data) {
                         if !entries.is_empty() {
-                            let bedeutungen = load_bedeutungen();
-                            let lookup_refs: Vec<&KernResult> = lookup_results.iter().copied().collect();
-                            output_lookup_json(&lookup_refs, &bedeutungen, show_pos, show_neg, show_full);
+                            let bedeutungen = load_bedeutungen_lang(lang);
+                            output_lookup_json(
+                                &entries,
+                                &bedeutungen,
+                                lang,
+                                show_pos,
+                                show_neg,
+                                show_full,
+                            );
                         }
                     }
                 }
@@ -831,18 +899,12 @@ fn main() {
         }
 
         if show_lookup {
-            #[derive(Deserialize)]
-            struct LookupEntry {
-                value: u32,
-                sources: Vec<String>,
-            }
-
             let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
 
             match payload {
                 Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
                     Ok(entries) if !entries.is_empty() => {
-                        let bedeutungen = load_bedeutungen();
+                        let bedeutungen = load_bedeutungen_lang(lang);
 
                         ui::spacing(ui::SPACING_MODE);
 
@@ -884,13 +946,17 @@ fn main() {
 /// Output error message and exit
 /// In TTY mode: prints to stderr
 /// In pipe mode: prints JSON error to stdout
-fn output_error(message: &str, is_tty: bool) -> ! {
+/// Aborts with `message`. In pipe mode the JSON carries the same `code` field
+/// the server emits, so a consumer can branch identically no matter which one
+/// it called — see docs/PRINCIPLES.md §3.
+fn output_error(code: ErrorCode, message: &str, is_tty: bool) -> ! {
     if is_tty {
         eprintln!("{}", message);
         std::process::exit(1);
     } else {
         // Pipe mode: JSON to stdout
         let error = ErrorResponse {
+            code,
             error: message.to_string(),
         };
         if let Ok(json) = serde_json::to_string(&error) {
@@ -961,6 +1027,7 @@ fn output_date_json(
     formatted_dates: &[chrono::NaiveDate],
     results: &[Option<&KernResult>],
     bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    lang: Lang,
     debug: bool,
 ) {
     let mut dates = Vec::new();
@@ -971,7 +1038,7 @@ fn output_date_json(
             let meaning = bedeutungen
                 .get(&result.value)
                 .and_then(|b| b.text.as_deref())
-                .unwrap_or("- keine Bedeutung -")
+                .unwrap_or_else(|| lang.missing_meaning())
                 .to_string();
 
             dates.push(DateItem {
@@ -984,7 +1051,10 @@ fn output_date_json(
         }
     }
 
-    let response = DateResponse { dates };
+    let response = DateResponse {
+        lang: lang.code(),
+        dates,
+    };
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
     }
@@ -992,19 +1062,20 @@ fn output_date_json(
 
 /// Output lookup results as JSON
 fn output_lookup_json(
-    lookup_results: &[&KernResult],
+    lookup_entries: &[LookupEntry],
     bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    lang: Lang,
     show_pos: bool,
     show_neg: bool,
     show_full: bool,
 ) {
     let mut items = Vec::new();
 
-    for result in lookup_results {
+    for result in lookup_entries {
         let entry = bedeutungen.get(&result.value);
         let meaning = entry
             .and_then(|b| b.text.as_deref())
-            .unwrap_or("- keine Bedeutung -")
+            .unwrap_or_else(|| lang.missing_meaning())
             .to_string();
 
         let positive = if show_pos || show_full {
@@ -1027,7 +1098,10 @@ fn output_lookup_json(
         });
     }
 
-    let response = LookupListResponse { items };
+    let response = LookupListResponse {
+        lang: lang.code(),
+        items,
+    };
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
     }
@@ -1161,11 +1235,14 @@ struct PhaseInput {
 
 /// Parse tokens into a list of input strings and steps.
 /// If phase_mode is true, creates PhaseRelation steps for all pairs.
+/// Errors carry their own [`ErrorCode`] rather than collapsing into one, so the
+/// CLI reports the same code the server would for the same situation
+/// (docs/PRINCIPLES.md §6).
 fn parse_pipeline_tokens(
     tokens: &[String],
     _cipher_aliases: &HashMap<String, String>,
     phase_mode: bool,
-) -> Result<ParsedPipeline, String> {
+) -> Result<ParsedPipeline, (ErrorCode, String)> {
     let mut inputs = Vec::new();
     let mut steps = Vec::new();
     let mut saw_total = false;
@@ -1190,15 +1267,25 @@ fn parse_pipeline_tokens(
     // If we're in phase relation mode
     if phase_mode {
         if inputs.len() < 2 {
-            return Err("Phase relation matrix requires at least 2 inputs".to_string());
+            // Same code the server returns for this situation.
+            return Err((
+                ErrorCode::InsufficientInputs,
+                "phase relation matrix requires at least 2 inputs".to_string(),
+            ));
         }
 
         // --total and --lookup are not supported with phase relations (for now)
         if saw_total {
-            return Err("--total is not supported with phase relation mode".to_string());
+            return Err((
+                ErrorCode::InvalidArguments,
+                "--total is not supported with phase relation mode".to_string(),
+            ));
         }
         if saw_lookup {
-            return Err("--lookup is not supported with phase relation mode".to_string());
+            return Err((
+                ErrorCode::InvalidArguments,
+                "--lookup is not supported with phase relation mode".to_string(),
+            ));
         }
 
         // Generate matrix pairs from all inputs

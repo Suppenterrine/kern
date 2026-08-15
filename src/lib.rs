@@ -19,6 +19,207 @@ pub mod core {
         pub schatten: Option<String>,
     }
 
+    /// Stable, machine-readable error identifiers shared by the CLI and the
+    /// server, so both report the same failure the same way.
+    ///
+    /// This is an enum rather than free-standing strings on purpose: a code
+    /// that is not declared here cannot be emitted, which is what lets
+    /// `cargo xtask check-error-codes` verify the OpenAPI spec against
+    /// [`ErrorCode::ALL`] and actually mean it.
+    ///
+    /// Codes are API surface. Renaming one is a breaking change for consumers;
+    /// the human-readable message next to it is not and may be reworded freely.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+    #[serde(into = "&'static str")]
+    pub enum ErrorCode {
+        InputMissing,
+        NoValidInputs,
+        NoValidCiphers,
+        UnknownCipher,
+        UnsupportedLanguage,
+        LanguageNotAvailable,
+        InvalidRange,
+        WordMissing,
+        InsufficientInputs,
+        InvalidRtapPart,
+        RtapPromptMissing,
+        SpektraFailed,
+        /// CLI only: the argument list or flag combination could not be
+        /// interpreted. The HTTP API has no equivalent — it has no flags.
+        InvalidArguments,
+    }
+
+    impl ErrorCode {
+        /// Every code either binary can emit.
+        pub const ALL: [ErrorCode; 13] = [
+            ErrorCode::InputMissing,
+            ErrorCode::NoValidInputs,
+            ErrorCode::NoValidCiphers,
+            ErrorCode::UnknownCipher,
+            ErrorCode::UnsupportedLanguage,
+            ErrorCode::LanguageNotAvailable,
+            ErrorCode::InvalidRange,
+            ErrorCode::WordMissing,
+            ErrorCode::InsufficientInputs,
+            ErrorCode::InvalidRtapPart,
+            ErrorCode::RtapPromptMissing,
+            ErrorCode::SpektraFailed,
+            ErrorCode::InvalidArguments,
+        ];
+
+        /// Codes the HTTP API can return. `cargo xtask check-error-codes`
+        /// requires this to match the OpenAPI spec exactly.
+        ///
+        /// Kept separate from [`ErrorCode::ALL`] so a CLI-only failure mode can
+        /// be modelled honestly instead of being forced into an ill-fitting API
+        /// code just to keep one list tidy.
+        pub const API: [ErrorCode; 12] = [
+            ErrorCode::InputMissing,
+            ErrorCode::NoValidInputs,
+            ErrorCode::NoValidCiphers,
+            ErrorCode::UnknownCipher,
+            ErrorCode::UnsupportedLanguage,
+            ErrorCode::LanguageNotAvailable,
+            ErrorCode::InvalidRange,
+            ErrorCode::WordMissing,
+            ErrorCode::InsufficientInputs,
+            ErrorCode::InvalidRtapPart,
+            ErrorCode::RtapPromptMissing,
+            ErrorCode::SpektraFailed,
+        ];
+
+        pub fn as_str(self) -> &'static str {
+            match self {
+                ErrorCode::InputMissing => "input_missing",
+                ErrorCode::NoValidInputs => "no_valid_inputs",
+                ErrorCode::NoValidCiphers => "no_valid_ciphers",
+                ErrorCode::UnknownCipher => "unknown_cipher",
+                ErrorCode::UnsupportedLanguage => "unsupported_language",
+                ErrorCode::LanguageNotAvailable => "language_not_available",
+                ErrorCode::InvalidRange => "invalid_range",
+                ErrorCode::WordMissing => "word_missing",
+                ErrorCode::InsufficientInputs => "insufficient_inputs",
+                ErrorCode::InvalidRtapPart => "invalid_rtap_part",
+                ErrorCode::RtapPromptMissing => "rtap_prompt_missing",
+                ErrorCode::SpektraFailed => "spektra_failed",
+                ErrorCode::InvalidArguments => "invalid_arguments",
+            }
+        }
+    }
+
+    impl From<ErrorCode> for &'static str {
+        fn from(code: ErrorCode) -> Self {
+            code.as_str()
+        }
+    }
+
+    impl fmt::Display for ErrorCode {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
+    }
+
+    /// Content language of the meanings knowledge base.
+    ///
+    /// Only the meanings (`bedeutung`/`lichtseite`/`schattenseite`) are
+    /// translated. Calculation output, cipher names and the SPEKTRA/RTAP
+    /// prompts are language independent.
+    /// English is the default: the API is an international interface, so an
+    /// unqualified request gets English. German requires an explicit `lang=de`.
+    /// Note this is *only* the default for request parameters — content that is
+    /// German by nature (the SPEKTRA and RTAP prompts) pins [`Lang::De`]
+    /// explicitly and must not follow this default.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
+    #[serde(rename_all = "lowercase")]
+    pub enum Lang {
+        De,
+        #[default]
+        En,
+        Fr,
+    }
+
+    impl Lang {
+        pub const ALL: [Lang; 3] = [Lang::De, Lang::En, Lang::Fr];
+
+        pub fn code(self) -> &'static str {
+            match self {
+                Lang::De => "de",
+                Lang::En => "en",
+                Lang::Fr => "fr",
+            }
+        }
+
+        /// Comma separated list of supported codes, for help and error texts.
+        pub fn supported() -> String {
+            Lang::ALL
+                .iter()
+                .map(|l| l.code())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
+        /// Parses a language tag by its primary subtag, case-insensitively.
+        /// `"EN"`, `"en-US"` and `"en_GB"` all resolve to [`Lang::En`], which
+        /// makes raw `Accept-Language` values usable as-is.
+        pub fn parse(tag: &str) -> Option<Lang> {
+            let primary = tag
+                .trim()
+                .split(['-', '_'])
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            Lang::ALL.into_iter().find(|l| l.code() == primary)
+        }
+
+        /// Languages the SPEKTRA and RTAP prompts exist in.
+        pub const PROMPT_LANGS: [Lang; 2] = [Lang::De, Lang::En];
+
+        /// Whether the prompts are available in this language. A language
+        /// without prompts is **rejected**, never silently served in another
+        /// language — returning English text to someone who asked for French
+        /// is a wrong answer dressed up as a successful one.
+        pub fn has_prompts(self) -> bool {
+            Lang::PROMPT_LANGS.contains(&self)
+        }
+
+        /// Comma separated list of languages the prompts exist in.
+        pub fn prompt_langs() -> String {
+            Lang::PROMPT_LANGS
+                .iter()
+                .map(|l| l.code())
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+
+        /// Placeholder for numbers without an entry in this language.
+        pub fn missing_meaning(self) -> &'static str {
+            match self {
+                Lang::De => "- keine Bedeutung -",
+                Lang::En => "- no meaning -",
+                Lang::Fr => "- aucune signification -",
+            }
+        }
+    }
+
+    impl fmt::Display for Lang {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.code())
+        }
+    }
+
+    impl std::str::FromStr for Lang {
+        type Err = String;
+
+        fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+            Lang::parse(s).ok_or_else(|| {
+                format!(
+                    "unsupported language '{s}'. supported: {}",
+                    Lang::supported()
+                )
+            })
+        }
+    }
+
     #[path = "../core/utils.rs"]
     pub mod utils;
 
@@ -266,13 +467,146 @@ pub mod core {
         fn alphabet_index_case_insensitive() {
             assert_eq!(alphabet_index("AbC"), vec![('A', 1), ('B', 2), ('C', 3)]);
         }
+
+        #[test]
+        fn error_code_strings_are_unique_and_well_formed() {
+            let mut seen = std::collections::HashSet::new();
+            for code in ErrorCode::ALL {
+                let s = code.as_str();
+                assert!(!s.is_empty(), "{code:?} has an empty string");
+                assert!(
+                    s.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                    "{s} must be lower_snake_case — codes are API surface"
+                );
+                assert!(seen.insert(s), "duplicate error code string: {s}");
+            }
+        }
+
+        /// `API` must be a subset of `ALL`, and every code not in `API` must be
+        /// a deliberate CLI-only one. Guards against a new API code being added
+        /// to `ALL` but forgotten in `API`, which would slip past the
+        /// spec check in xtask.
+        #[test]
+        fn api_error_codes_are_a_subset_of_all() {
+            for code in ErrorCode::API {
+                assert!(
+                    ErrorCode::ALL.contains(&code),
+                    "{code:?} is in API but missing from ALL"
+                );
+            }
+
+            let cli_only: Vec<_> = ErrorCode::ALL
+                .iter()
+                .filter(|c| !ErrorCode::API.contains(c))
+                .copied()
+                .collect();
+            assert_eq!(
+                cli_only,
+                vec![ErrorCode::InvalidArguments],
+                "the set of CLI-only codes changed; update this test and docs/reference/error-codes.md deliberately"
+            );
+        }
+
+        #[test]
+        fn lang_default_is_english() {
+            assert_eq!(Lang::default(), Lang::En);
+            assert_eq!(Lang::default().code(), "en");
+        }
+
+        /// The SPEKTRA prompt is German and pulls its meanings through these
+        /// helpers, so they must stay German even though the default is English.
+        #[test]
+        fn german_helpers_do_not_follow_the_default_language() {
+            assert_ne!(Lang::default(), Lang::De, "precondition for this test");
+
+            let map = load_bedeutungen();
+            let german = load_bedeutungen_lang(Lang::De);
+            assert_eq!(
+                map.get(&1).unwrap().text,
+                german.get(&1).unwrap().text,
+                "load_bedeutungen() must stay German"
+            );
+            assert_eq!(
+                lookup(10, &map),
+                Lang::De.missing_meaning(),
+                "lookup() must use the German placeholder"
+            );
+        }
+
+        #[test]
+        fn lang_parses_plain_codes() {
+            assert_eq!(Lang::parse("de"), Some(Lang::De));
+            assert_eq!(Lang::parse("en"), Some(Lang::En));
+            assert_eq!(Lang::parse("fr"), Some(Lang::Fr));
+        }
+
+        #[test]
+        fn lang_parsing_is_case_and_region_insensitive() {
+            assert_eq!(Lang::parse("EN"), Some(Lang::En));
+            assert_eq!(Lang::parse("en-US"), Some(Lang::En));
+            assert_eq!(Lang::parse("fr_CA"), Some(Lang::Fr));
+            assert_eq!(Lang::parse("  De  "), Some(Lang::De));
+        }
+
+        #[test]
+        fn lang_rejects_unsupported_tags() {
+            assert_eq!(Lang::parse("es"), None);
+            assert_eq!(Lang::parse(""), None);
+            assert_eq!(Lang::parse("english"), None);
+        }
+
+        #[test]
+        fn lang_from_str_error_names_supported_codes() {
+            let err = "es".parse::<Lang>().unwrap_err();
+            assert!(err.contains("es"), "error should quote the input: {err}");
+            for lang in Lang::ALL {
+                assert!(
+                    err.contains(lang.code()),
+                    "error should list {}: {err}",
+                    lang.code()
+                );
+            }
+        }
+
+        #[test]
+        fn missing_meaning_is_localized_and_distinct() {
+            let texts: Vec<&str> = Lang::ALL.iter().map(|l| l.missing_meaning()).collect();
+            assert_eq!(texts.len(), 3);
+            for (i, a) in texts.iter().enumerate() {
+                assert!(!a.trim().is_empty());
+                for b in texts.iter().skip(i + 1) {
+                    assert_ne!(a, b, "placeholder texts must differ per language");
+                }
+            }
+        }
+
+        #[test]
+        fn lookup_lang_uses_localized_placeholder_for_missing_number() {
+            // 10 is not defined in any bedeutungen file.
+            for lang in Lang::ALL {
+                let map = load_bedeutungen_lang(lang);
+                assert_eq!(lookup_lang(10, &map, lang), lang.missing_meaning());
+            }
+        }
     }
 
-    pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
-        // Datei wird zur Compilezeit als String eingebettet
-        let yaml_str = include_str!("../bedeutungen.yaml");
+    /// Raw YAML source for a language. All files are embedded at compile time,
+    /// so the binary stays self-contained and no runtime lookup can fail.
+    fn bedeutungen_source(lang: Lang) -> &'static str {
+        match lang {
+            Lang::De => include_str!("../bedeutungen.yaml"),
+            Lang::En => include_str!("../bedeutungen.en.yaml"),
+            Lang::Fr => include_str!("../bedeutungen.fr.yaml"),
+        }
+    }
+
+    /// Loads the meanings for `lang`. The German file is the base and also
+    /// carries the language independent `rtap_*` prompts; non-numeric keys are
+    /// skipped here in every language.
+    pub fn load_bedeutungen_lang(lang: Lang) -> HashMap<u32, Bedeutung> {
+        let yaml_str = bedeutungen_source(lang);
         let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
-            .expect("Failed to parse bedeutungen.yaml");
+            .unwrap_or_else(|e| panic!("Failed to parse bedeutungen ({lang}): {e}"));
 
         let mut bedeutungen = HashMap::new();
 
@@ -293,11 +627,40 @@ pub mod core {
         bedeutungen
     }
 
-    /// Load RTAP prompts from embedded bedeutungen.yaml
-    pub fn load_rtap_prompts() -> HashMap<String, String> {
-        let yaml_str = include_str!("../bedeutungen.yaml");
+    /// Meanings in German, independent of [`Lang::default`]. This is for the
+    /// German-only surfaces (SPEKTRA prompt); anything driven by a request
+    /// parameter must use [`load_bedeutungen_lang`] instead.
+    pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
+        load_bedeutungen_lang(Lang::De)
+    }
+
+    /// All languages at once — used by the server, which keeps every language
+    /// resident in state instead of re-parsing YAML per request.
+    pub fn load_all_bedeutungen() -> HashMap<Lang, HashMap<u32, Bedeutung>> {
+        Lang::ALL
+            .into_iter()
+            .map(|lang| (lang, load_bedeutungen_lang(lang)))
+            .collect()
+    }
+
+    /// YAML source carrying the `rtap_*` prompts for `lang`, or `None` if the
+    /// prompts do not exist in that language. Matched exhaustively so a new
+    /// language forces an explicit decision instead of inheriting a fallback.
+    fn rtap_source(lang: Lang) -> Option<&'static str> {
+        match lang {
+            Lang::De => Some(include_str!("../bedeutungen.yaml")),
+            Lang::En => Some(include_str!("../bedeutungen.en.yaml")),
+            Lang::Fr => None,
+        }
+    }
+
+    /// Load RTAP prompts for `lang`, or `None` if they do not exist in that
+    /// language. Callers must surface that as an error rather than substituting
+    /// another language.
+    pub fn load_rtap_prompts_lang(lang: Lang) -> Option<HashMap<String, String>> {
+        let yaml_str = rtap_source(lang)?;
         let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
-            .expect("Failed to parse bedeutungen.yaml");
+            .unwrap_or_else(|e| panic!("Failed to parse RTAP prompts ({lang}): {e}"));
 
         let mut prompts = HashMap::new();
 
@@ -311,7 +674,13 @@ pub mod core {
             }
         }
 
-        prompts
+        Some(prompts)
+    }
+
+    /// RTAP prompts in the default language, which always has them.
+    pub fn load_rtap_prompts() -> HashMap<String, String> {
+        load_rtap_prompts_lang(Lang::default())
+            .expect("the default language must have prompts")
     }
 
     /// Get RTAP prompt by part number (1 or 2)
@@ -320,10 +689,18 @@ pub mod core {
         prompts.get(&key).map(|s| s.as_str())
     }
 
-    pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
+    /// Meaning text for `zahl`, falling back to the localized placeholder.
+    /// `lang` must match the language `map` was loaded with — it only selects
+    /// the placeholder wording.
+    pub fn lookup_lang<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>, lang: Lang) -> &'a str {
         map.get(&zahl)
             .and_then(|b| b.text.as_deref())
-            .unwrap_or("- keine Bedeutung -")
+            .unwrap_or_else(|| lang.missing_meaning())
+    }
+
+    /// German lookup, paired with [`load_bedeutungen`].
+    pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
+        lookup_lang(zahl, map, Lang::De)
     }
 
     pub fn reduce_number_steps_with_cipher(input: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
@@ -418,8 +795,8 @@ pub mod core {
 
         // A)  -5..4   oder   3..-2
         if let Some((a, b)) = spec.split_once("..") {
-            let s: i32 = a.parse().map_err(|_| "Ungültiger Start")?;
-            let e: i32 = b.parse().map_err(|_| "Ungültiges Ende")?;
+            let s: i32 = a.parse().map_err(|_| "invalid range start")?;
+            let e: i32 = b.parse().map_err(|_| "invalid range end")?;
             let mut v = Vec::new();
             if s <= e {
                 for i in s..=e {
@@ -455,6 +832,6 @@ pub mod core {
         // C) Einzelwert
         spec.parse::<i32>()
             .map(|v| vec![v])
-            .map_err(|_| "Ungültige Range-Angabe".into())
+            .map_err(|_| "invalid range specification".into())
     }
 }

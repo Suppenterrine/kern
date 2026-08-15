@@ -1,0 +1,63 @@
+# French translation of bedeutungen.yaml (German base file).
+# Keep the numeric keys in sync with bedeutungen.yaml — every number defined
+# there must exist here as well (enforced by tests/bedeutungen_tests.rs).
+
+1:
+  bedeutung: "Origine, volonté, individualité, nouveau départ"
+  lichtseite: "Esprit pionnier, qualités de meneur, courage d'ouvrir de nouvelles voies, confiance en soi, indépendance"
+  schattenseite: "Égoïsme, entêtement, domination, absence de scrupules, isolement par surestimation de soi"
+
+2:
+  bedeutung: "Dualité, relation, harmonie, sensibilité"
+  lichtseite: "Diplomatie, esprit d'équipe, empathie, sens de la médiation, perception intuitive"
+  schattenseite: "Indécision, dépendance excessive, fuite du conflit, instabilité émotionnelle"
+
+3:
+  bedeutung: "Expression, créativité, communication"
+  lichtseite: "Talent artistique, charisme, optimisme, communication inspirante, joie de vivre"
+  schattenseite: "Superficialité, bavardage, dispersion, vanité, manque de persévérance"
+
+4:
+  bedeutung: "Stabilité, ordre, structure, sécurité"
+  lichtseite: "Fiabilité, démarche méthodique, endurance, solutions pratiques, loyauté"
+  schattenseite: "Rigidité, pédanterie, peur du changement, contrôle excessif, étroitesse d'esprit"
+
+5:
+  bedeutung: "Liberté, changement, aventure, sensualité"
+  lichtseite: "Souplesse, curiosité, ouverture au monde, spontanéité, vitalité, capacité d'adaptation"
+  schattenseite: "Agitation, irresponsabilité, superficialité, inconstance, tendance à la dépendance"
+
+6:
+  bedeutung: "Responsabilité, amour, bienveillance, équilibre"
+  lichtseite: "Dévouement désintéressé, capacités de guérison, sens de la famille, besoin d'harmonie, instinct de protection"
+  schattenseite: "Sacrifice de soi, besoin compulsif de contrôle, martyre, comportement surprotecteur, codépendance"
+
+7:
+  bedeutung: "Profondeur, intuition, analyse, retrait"
+  lichtseite: "Connaissance spirituelle, pensée analytique, sagesse, capacités mystiques, introspection"
+  schattenseite: "Isolement, méfiance, sur-analyse, détachement du réel, tendances mélancoliques"
+
+8:
+  bedeutung: "Pouvoir, réussite, matière, karma"
+  lichtseite: "Qualités de direction, réussite matérielle, talent d'organisation, force de persuasion, sens de la justice"
+  schattenseite: "Abus de pouvoir, matérialisme, absence de pitié, addiction au travail, froideur émotionnelle"
+
+9:
+  bedeutung: "Accomplissement, sagesse, service, lâcher-prise"
+  lichtseite: "Service humanitaire, amour universel, sagesse, tolérance, dévouement désintéressé"
+  schattenseite: "Mal-être face au monde, idéalisme exagéré, éloignement du réel, submersion émotionnelle, amertume"
+
+11:
+  bedeutung: "Canal spirituel. Intuition et inspiration. La porte entre les mondes."
+  lichtseite: "Hypersensibilité comme don, capacités visionnaires, guidance spirituelle, inspiration pour autrui, talent médiumnique"
+  schattenseite: "Nervosité, fuite du réel, confusion psychique, perfectionnisme extrême, fragilité psychique"
+
+22:
+  bedeutung: "Maître architecte. Incarnation de grandes visions dans la forme. Clarté manifestée."
+  lichtseite: "Réalisation de grands projets, énergie visionnaire du bâtisseur, spiritualité pratique, exemplarité dans la conduite"
+  schattenseite: "Mégalomanie, surcharge due à des exigences trop élevées, impatience face aux « petites » tâches, effondrement nerveux"
+
+33:
+  bedeutung: "Maître de l'amour inconditionnel. Présence par la compassion. Service sacré sans perte de soi."
+  lichtseite: "Force de guérison universelle, amour inconditionnel, qualités d'enseignant spirituel, présence transformatrice"
+  schattenseite: "Épuisement émotionnel, déni de soi, empathie submergeante, burn-out par le don sans fin"

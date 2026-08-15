@@ -16,7 +16,40 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+
     - name: Build
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+
+  # Consistency that would otherwise depend on someone remembering: the version
+  # in every derived file, and the error codes documented in the OpenAPI spec.
+  # See docs/PRINCIPLES.md and docs/reference/tooling.md.
+  consistency:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-consistency-${{ hashFiles('**/Cargo.lock') }}
+
+    # Reports every drift it finds, not just the first, and writes nothing.
+    - name: Consistency checks
+      run: cargo xtask check

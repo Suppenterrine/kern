@@ -1,13 +1,14 @@
-use kern::core::{Bedeutung, load_bedeutungen, lookup};
+use kern::core::{Bedeutung, Lang, load_bedeutungen, load_bedeutungen_lang, lookup, lookup_lang};
 use std::collections::HashMap;
+
+/// Zahlen, die in bedeutungen.yaml definiert sind
+const EXPECTED_NUMBERS: [u32; 12] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 22, 33];
 
 #[test]
 fn bedeutungen_has_text_light_shadow_for_known_numbers() {
     let map = load_bedeutungen();
 
-    // Zahlen, die in bedeutungen.yaml definiert sind
-    let expected = [1u32, 2, 3, 4, 5, 6, 7, 8, 9, 11, 22, 33];
-    for &n in &expected {
+    for &n in &EXPECTED_NUMBERS {
         let entry = map.get(&n).expect("missing entry in bedeutungen.yaml");
         assert!(entry.text.as_ref().is_some_and(|s| !s.trim().is_empty()));
         assert!(entry.licht.as_ref().is_some_and(|s| !s.trim().is_empty()));
@@ -17,6 +18,81 @@ fn bedeutungen_has_text_light_shadow_for_known_numbers() {
                 .as_ref()
                 .is_some_and(|s| !s.trim().is_empty())
         );
+    }
+}
+
+#[test]
+fn every_language_is_complete() {
+    for lang in Lang::ALL {
+        let map = load_bedeutungen_lang(lang);
+
+        for &n in &EXPECTED_NUMBERS {
+            let entry = map
+                .get(&n)
+                .unwrap_or_else(|| panic!("number {n} missing in language '{lang}'"));
+
+            for (field, value) in [
+                ("bedeutung", &entry.text),
+                ("lichtseite", &entry.licht),
+                ("schattenseite", &entry.schatten),
+            ] {
+                assert!(
+                    value.as_ref().is_some_and(|s| !s.trim().is_empty()),
+                    "'{field}' for number {n} is empty in language '{lang}'"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn languages_have_identical_key_sets() {
+    let base: std::collections::BTreeSet<u32> = load_bedeutungen_lang(Lang::De).keys().copied().collect();
+
+    for lang in Lang::ALL {
+        let keys: std::collections::BTreeSet<u32> =
+            load_bedeutungen_lang(lang).keys().copied().collect();
+        assert_eq!(
+            keys, base,
+            "language '{lang}' has a different set of numbers than the German base file"
+        );
+    }
+}
+
+#[test]
+fn translations_are_not_copies_of_the_german_source() {
+    // Fängt eine Übersetzungsdatei ab, die versehentlich deutschen Text behalten hat.
+    let german = load_bedeutungen_lang(Lang::De);
+
+    for lang in Lang::ALL.into_iter().filter(|l| *l != Lang::De) {
+        let map = load_bedeutungen_lang(lang);
+
+        for &n in &EXPECTED_NUMBERS {
+            let de = german.get(&n).unwrap();
+            let tr = map.get(&n).unwrap();
+            assert_ne!(
+                de.text, tr.text,
+                "'bedeutung' for number {n} is still German in language '{lang}'"
+            );
+            assert_ne!(
+                de.licht, tr.licht,
+                "'lichtseite' for number {n} is still German in language '{lang}'"
+            );
+            assert_ne!(
+                de.schatten, tr.schatten,
+                "'schattenseite' for number {n} is still German in language '{lang}'"
+            );
+        }
+    }
+}
+
+#[test]
+fn lookup_lang_returns_the_requested_language() {
+    for lang in Lang::ALL {
+        let map = load_bedeutungen_lang(lang);
+        let text = lookup_lang(1, &map, lang);
+        assert_eq!(text, map.get(&1).unwrap().text.as_deref().unwrap());
+        assert_ne!(text, lang.missing_meaning());
     }
 }
 

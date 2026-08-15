@@ -91,6 +91,7 @@ hello
 | `--pos` | Nur positive Aspekte anzeigen |
 | `--neg` | Nur negative Aspekte anzeigen |
 | `--cipher CIPHER` | Spezifische Chiffren (kommagetrennt oder `all`) |
+| `--lang CODE` | Sprache der Inhalte: `en` (Standard), `de`, `fr` |
 | `-L, --length` | Zeigt Wort-Länge an |
 | `-t, --total` | Berechnet und zeigt die Summe aller Reduktionen |
 | `-d, --date RANGE` | Reduziert Daten (z.B. `-d -3..7` oder `-d 25.12.2025`) |
@@ -171,7 +172,7 @@ docker run -d -p 3000:3000 --name kern-server 24biteggplant/kern-server:latest
 
 **Live API:**
 ```
-https://kern.drehraum.wtf
+https://kern.lukasbaumert.de
 ```
 
 ---
@@ -180,15 +181,33 @@ https://kern.drehraum.wtf
 
 #### `GET /`
 
-API-Übersicht mit allen verfügbaren Endpunkten und Beispielen.
+Schlanker Service-Deskriptor für Health-Checks: Name, Version, Sprachen und ein
+Zeiger auf die Doku. Die vollständige Endpunkt-Übersicht liegt auf `/help`.
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/"
+$ curl "https://kern.lukasbaumert.de/"
 
 {
   "name": "KERN API",
-  "version": "1.0.2",
+  "version": "2.0.0",
+  "languages": ["de", "en", "fr"],
+  "default_language": "en",
+  "documentation": "/help"
+}
+```
+
+#### `GET /help`
+
+Vollständige Endpunkt-Übersicht mit Beispielen.
+
+**Beispiel:**
+```bash
+$ curl "https://kern.lukasbaumert.de/help"
+
+{
+  "name": "KERN API",
+  "version": "2.0.0",
   "endpoints": [...],
   "examples": {...}
 }
@@ -200,7 +219,7 @@ Gibt Name und Versionsnummer zurück.
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/version"
+$ curl "https://kern.lukasbaumert.de/version"
 
 {
   "name": "kern",
@@ -223,7 +242,7 @@ Reduziert ein oder mehrere Inputs mit einem oder mehreren Chiffren.
 
 **Einfache Reduktion:**
 ```bash
-$ curl "https://kern.drehraum.wtf/reduce?input=Wickfeld"
+$ curl "https://kern.lukasbaumert.de/reduce?input=Wickfeld"
 
 {
   "items": [
@@ -238,7 +257,7 @@ $ curl "https://kern.drehraum.wtf/reduce?input=Wickfeld"
 
 **Multi-Input:**
 ```bash
-$ curl "https://kern.drehraum.wtf/reduce?input=Test,Love,Life"
+$ curl "https://kern.lukasbaumert.de/reduce?input=Test,Love,Life"
 
 {
   "items": [
@@ -252,7 +271,7 @@ $ curl "https://kern.drehraum.wtf/reduce?input=Test,Love,Life"
 
 **Multi-Cipher:**
 ```bash
-$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=or,py,ch"
+$ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=or,py,ch"
 
 {
   "items": [
@@ -271,7 +290,7 @@ $ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=or,py,ch"
 
 **Alle Ciphers:**
 ```bash
-$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=all"
+$ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=all"
 
 {
   "items": [
@@ -291,7 +310,7 @@ $ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=all"
 
 **Mit Debug-Chains:**
 ```bash
-$ curl "https://kern.drehraum.wtf/reduce?input=Test&cipher=all&debug=true"
+$ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=all&debug=true"
 
 {
   "items": [
@@ -318,16 +337,30 @@ Bedeutung einer einzelnen Zahl.
 
 **Parameter:**
 - `parts` (optional): `full`, `pos`, `neg`, `both` (legacy: `light`, `shadow`)
+- `lang` (optional): `en` (Standard), `de`, `fr` — siehe [Sprachen](#sprachen)
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/lookup/7?parts=full"
+$ curl "https://kern.lukasbaumert.de/lookup/7?parts=full"
 
 {
   "number": 7,
+  "lang": "en",
+  "meaning": "Depth, intuition, analysis, withdrawal",
+  "positive": "Spiritual insight, analytical thinking...",
+  "negative": "Isolation, mistrust..."
+}
+```
+
+Für Deutsch explizit `lang=de` angeben:
+```bash
+$ curl "https://kern.lukasbaumert.de/lookup/7?parts=full&lang=de"
+
+{
+  "number": 7,
+  "lang": "de",
   "meaning": "Tiefe, Intuition, Analyse, Rückzug",
-  "positive": "Spirituelle Tiefe, analytisches Denken...",
-  "negative": "Isolation, Misstrauen..."
+  ...
 }
 ```
 
@@ -338,12 +371,14 @@ Bedeutungen mehrerer Zahlen.
 **Parameter:**
 - `numbers` (erforderlich): Kommagetrennte Zahlen
 - `parts` (optional): `full`, `pos`, `neg`, `both`
+- `lang` (optional): `en` (Standard), `de`, `fr`
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/lookup?numbers=1,7,11&parts=full"
+$ curl "https://kern.lukasbaumert.de/lookup?numbers=1,7,11&parts=full"
 
 {
+  "lang": "de",
   "items": [
     {
       "number": 1,
@@ -364,12 +399,14 @@ Reduziert einen Datums-Bereich.
 **Parameter:**
 - `range` (erforderlich): Offset-Range (z.B. `-3..7`) oder Datums-Range (z.B. `25.12.2025..02.01.2026`)
 - `debug` (optional): `true` für Berechnungsschritte
+- `lang` (optional): `en` (Standard), `de`, `fr`
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/date?range=0..3&debug=true"
+$ curl "https://kern.lukasbaumert.de/date?range=0..3&debug=true"
 
 {
+  "lang": "de",
   "dates": [
     {
       "offset": 0,
@@ -389,15 +426,123 @@ Generiert SPEKTRA-Analyseprompt mit allen 11 Chiffren.
 
 **Parameter:**
 - `word` (erforderlich): Wort zur Analyse
+- `lang` (optional): `en` (Standard) oder `de`; `fr` wird abgelehnt
 
 **Beispiel:**
 ```bash
-$ curl "https://kern.drehraum.wtf/spektra?word=Love"
+$ curl "https://kern.lukasbaumert.de/spektra?word=Love"
 
 {
-  "prompt": "Du bist das SPEKTRA-Analysemodul...\n[Vollständiger Prompt mit allen Chiffren und Bedeutungen]"
+  "lang": "en",
+  "prompt": "You are the SPEKTRA analysis module...\n[Vollständiger Prompt mit allen Chiffren und Bedeutungen]"
 }
 ```
+
+---
+
+## Sprachen
+
+**Standard ist Englisch.** Für Deutsch oder Französisch muss `lang` gesetzt werden.
+
+Nicht alle Inhalte gibt es in allen Sprachen:
+
+| Inhalt | `en` | `de` | `fr` | Dateien |
+|--------|:----:|:----:|:----:|---------|
+| Zahlenbedeutungen (`/lookup`, `/date`) | ✅ | ✅ | ✅ | `bedeutungen.{en,fr}.yaml`, `bedeutungen.yaml` (de) |
+| SPEKTRA-Prompt (`/spektra`) | ✅ | ✅ | ❌ | `spektra_prompt.{en,}txt` |
+| RTAP-Prompts (`/rtap`) | ✅ | ✅ | ❌ | `rtap_*`-Keys in den Bedeutungsdateien |
+| Fehlermeldungen | ✅ | — | — | immer Englisch |
+
+**Keine stillen Fallbacks.** `/spektra?lang=fr` liefert keinen englischen Text,
+sondern einen Fehler:
+
+```json
+{"code": "language_not_available", "error": "prompts are not available in 'fr'. available: de, en"}
+```
+
+Das ist Absicht: eine Antwort in einer anderen Sprache als der angefragten wäre
+eine falsche Antwort im Gewand einer erfolgreichen. Siehe
+[docs/PRINCIPLES.md](docs/PRINCIPLES.md).
+
+Berechnungen und Chiffren-Namen sind sprachunabhängig.
+
+**Verwendung:**
+
+```bash
+# API
+$ curl "https://kern.lukasbaumert.de/lookup/7?parts=full&lang=fr"
+$ curl "https://kern.lukasbaumert.de/spektra?word=Love&lang=de"
+
+# CLI
+$ kern --lang de --lookup Wickfeld
+$ kern --lang de --rtap 1
+```
+
+**Verhalten:**
+
+- Ohne `lang` wird **Englisch** geliefert. Englisch ist der internationale
+  Standard für eine öffentliche API; für Deutsch muss `lang=de` gesetzt werden.
+- Regions-Subtags werden akzeptiert und ignoriert: `en-US` → `en`, `fr_CA` → `fr`.
+- Ein nicht unterstützter Code wird **abgelehnt**, nicht stillschweigend
+  ersetzt:
+
+  ```bash
+  $ curl -i "https://kern.lukasbaumert.de/lookup/7?lang=es"
+  HTTP/1.1 400 Bad Request
+
+  {"code": "unsupported_language", "error": "unsupported language 'es'. supported: de, en, fr"}
+  ```
+
+- Jede Antwort enthält ein `lang`-Feld mit der tatsächlich verwendeten Sprache.
+- `lang` steuert die **Inhalte**, nicht das Protokoll: Fehlermeldungen sind
+  immer Englisch.
+
+---
+
+## Fehlerformat
+
+Jeder Fehler liefert einen stabilen `code` und einen menschenlesbaren `error`-Text
+— **von API und CLI gleichermaßen**, im selben Format:
+
+```json
+{"code": "invalid_range", "error": "invalid range specification"}
+```
+
+**Gegen `code` programmieren, nicht gegen `error`** — der Text ist Prosa und
+kann jederzeit umformuliert werden, der Code nicht.
+
+Im TTY-Modus gibt das CLI stattdessen Klartext auf stderr aus und beendet mit
+Exit-Code 1. Vollständige Referenz: [docs/reference/error-codes.md](docs/reference/error-codes.md).
+
+| Code | Bedeutung |
+|------|-----------|
+| `input_missing` | `input`-Parameter fehlt |
+| `no_valid_inputs` | `input` enthielt keine verwertbaren Werte |
+| `no_valid_ciphers` | `cipher` gesetzt, aber ohne gültige Codes |
+| `unknown_cipher` | Unbekannter Chiffren-Code |
+| `unsupported_language` | `lang` ist keine unterstützte Sprache |
+| `language_not_available` | Sprache ist gültig, aber für diese Ressource nicht verfügbar (z. B. `fr` bei Prompts) |
+| `invalid_range` | `range` nicht parsebar |
+| `word_missing` | `word`-Parameter fehlt (`/spektra`) |
+| `insufficient_inputs` | `/phase` braucht mindestens 2 Inputs |
+| `invalid_rtap_part` | `part` muss 1, 2 oder `both` sein |
+| `rtap_prompt_missing` | RTAP-Prompt nicht in der Konfiguration |
+| `spektra_failed` | SPEKTRA-Prompt konnte nicht erzeugt werden |
+| `invalid_arguments` | Nur CLI: Argumente oder Flag-Kombination nicht interpretierbar |
+
+**Neue Sprache hinzufügen:**
+
+1. `bedeutungen.<code>.yaml` anlegen (gleiche Zahlen-Keys wie `bedeutungen.yaml`)
+2. Variante in `Lang` ergänzen (`src/lib.rs`) — `code()`, `ALL` und
+   `missing_meaning()` werden vom Compiler eingefordert
+3. Datei in `bedeutungen_source()` einbinden
+4. Entscheiden, ob die Prompts mit übersetzt werden. Der Compiler erzwingt die
+   Entscheidung: `prompt_assets()` und `rtap_source()` matchen erschöpfend.
+   Ohne Übersetzung → `None`, die Sprache wird auf den Prompt-Endpunkten sauber
+   abgelehnt. Mit Übersetzung → `spektra_prompt.<code>.txt`, `rtap_*`-Keys in der
+   Bedeutungsdatei, `SpektraLabels`-Konstante und Eintrag in `Lang::PROMPT_LANGS`
+5. `cargo test` — die Tests prüfen Vollständigkeit, Key-Gleichheit aller Sprachen
+   und dass Template und Platzhalter-Labels zusammenpassen
 
 ---
 
@@ -419,5 +564,5 @@ $ curl "https://kern.drehraum.wtf/spektra?word=Love"
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 1.1.2
+**STATUS:** Stabil | **VERSION:** 2.0.0
 

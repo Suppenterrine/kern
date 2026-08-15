@@ -5,3 +5,7 @@ edition = "2021"
 
 [dependencies]
 regex = "1"
+serde_yaml = "0.9"
+# The error codes are read from the library itself rather than parsed out of
+# source text, so the check cannot drift from what the code actually emits.
+kern = { path = ".." }
