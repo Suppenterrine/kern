@@ -32,6 +32,12 @@ curl https://kern.lukasbaumert.de/lookup/7    # muss englisch antworten
 bekommen ab dem Deploy englische statt deutscher Inhalte, und `/` liefert nicht
 mehr die Endpunkt-Übersicht (die liegt jetzt auf `/help`).
 
+### Der neue Release-Workflow ist ungetestet
+
+`release.yml` wurde auf `workflow_dispatch` mit Draft-First umgebaut, aber seit
+dem Umbau noch nicht ausgeführt — v2.0.0 lief über den alten Weg. Beim nächsten
+Release genau hinschauen, besonders auf die Asset-Uploads über die Release-ID.
+
 ### Deployment automatisieren
 
 Der letzte Schritt ist Handarbeit auf dem Host — genau die Stelle, an der laut

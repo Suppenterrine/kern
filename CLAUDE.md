@@ -117,8 +117,15 @@ cargo xtask check              # all consistency checks, writes nothing
 cargo set-version 2.1.0        # bump the source of truth (cargo-edit)
 cargo xtask sync-version       # write it into README + OpenAPI spec
 cargo xtask check-error-codes  # ErrorCode::API vs. the OpenAPI spec
-cargo xtask check-tag v2.1.0   # release tag vs. the crate version
+cargo xtask check-release      # release note present? tag still free?
 ```
+
+Releasing is `gh workflow run release.yml`. The workflow reads the version from
+`Cargo.toml`, derives the tag, takes the body from
+`docs/release-notes/<version>.md`, creates a **draft**, builds, verifies the
+artifacts arrived, and only then publishes. A failed build leaves a draft
+rather than a published release with missing artifacts. Never create a release
+by hand — the workflow no longer triggers on one.
 
 `cargo set-version` alone is not enough — it only knows `Cargo.toml`. Add new
 derived locations to the `DERIVED` table in `xtask/src/main.rs` rather than
