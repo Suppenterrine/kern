@@ -17,14 +17,37 @@ abhängen würde — siehe [PRINCIPLES §4](../PRINCIPLES.md).
 
 | Befehl | Wirkung |
 |--------|---------|
-| `cargo xtask check` | Führt alle Checks aus, schreibt nichts. Als CI-Gate gedacht. |
+| `cargo xtask check` | Führt alle Checks aus, schreibt nichts. Läuft als CI-Gate. |
 | `cargo xtask sync-version` | Schreibt die `Cargo.toml`-Version in alle abgeleiteten Dateien |
 | `cargo xtask sync-version --check` | Meldet Drift, schreibt nichts, Exit 1 bei Abweichung |
 | `cargo xtask check-error-codes` | Vergleicht `ErrorCode::API` mit der OpenAPI-Spec |
+| `cargo xtask check-tag <TAG>` | Prüft, ob ein Release-Tag zur `Cargo.toml`-Version passt |
 | `cargo xtask bump version <major\|minor\|patch>` | Bumpt `Cargo.toml` und synchronisiert danach |
 
 `check` sammelt **alle** Fehlschläge und meldet sie gemeinsam, statt beim ersten
 abzubrechen — ein Durchlauf sagt dir alles, was zu tun ist.
+
+`check-tag` ist nicht Teil von `check`, weil es ein Argument braucht; es läuft
+nur im Release-Workflow.
+
+---
+
+## In der CI
+
+| Workflow | Job | Wann | Inhalt |
+|----------|-----|------|--------|
+| `rust.yml` | `build` | Push auf `master`, PRs nach `master` | `cargo build`, `cargo test` |
+| `rust.yml` | `consistency` | dito | `cargo xtask check` |
+| `release.yml` | `consistency` | veröffentlichtes Release | `cargo xtask check`, `check-tag`, `cargo test` |
+
+Im Release-Workflow ist `consistency` ein **Gate**: `build-win` hängt per
+`needs` daran, `build-linux` wiederum an `build-win`. Schlägt das Gate fehl,
+werden weder Binaries hochgeladen noch ein Docker-Image nach GHCR gepusht.
+
+Der Tag-Check ist dabei der wichtigste: ohne ihn kann ein als `v2.0.0`
+getaggtes Release Binaries ausliefern, die sich als `1.2.0` melden — dieselbe
+Drift, die `sync-version` innerhalb des Repos verhindert, nur an der
+Release-Grenze.
 
 ---
 
@@ -101,7 +124,9 @@ Details zu den Codes selbst: [error-codes.md](error-codes.md).
 
 ## Grenzen
 
-- `xtask` deckt Versionen und Fehlercodes ab. Andere Konsistenzfragen (etwa ob
-  die README-Beispielausgaben noch zur echten Ausgabe passen) prüft es nicht.
-- `check` läuft noch nicht automatisch in CI. Solange das so ist, ist es ein
-  manueller Schritt vor dem Release.
+- `xtask` deckt Versionen, Fehlercodes und den Release-Tag ab. Andere
+  Konsistenzfragen prüft es nicht — etwa ob die README-Beispielausgaben noch
+  zur tatsächlichen Ausgabe passen, oder ob die Endpunkt-Beschreibungen in
+  `/help` mit der OpenAPI-Spec übereinstimmen.
+- `rust.yml` läuft nur auf `master` und auf PRs **nach** `master`. Pushes auf
+  Feature-Branches ohne offenen PR werden nicht geprüft.

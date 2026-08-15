@@ -20,6 +20,7 @@ Usage:
   cargo xtask check                    Run every consistency check (CI gate)
   cargo xtask sync-version [--check]   Write the Cargo.toml version into all derived files
   cargo xtask check-error-codes        Verify the OpenAPI spec matches ErrorCode::API
+  cargo xtask check-tag <TAG>          Verify a release tag matches the Cargo.toml version
   cargo xtask bump version <major|minor|patch>
 
 The --check forms write nothing and exit non-zero on drift.";
@@ -33,12 +34,35 @@ fn run() -> Result<(), Box<dyn Error>> {
         ["sync-version"] => sync_version(&root, false),
         ["sync-version", "--check"] => sync_version(&root, true),
         ["check-error-codes"] => check_error_codes(&root),
+        ["check-tag", tag] => check_tag(&root, tag),
         ["bump", "version", kind] => bump(&root, kind),
         _ => {
             eprintln!("{USAGE}");
             std::process::exit(1);
         }
     }
+}
+
+/// Verifies that a release tag names the version actually being built.
+///
+/// Without this, a release tagged `v2.0.0` can happily publish binaries that
+/// report `1.2.0`, which is the same drift `sync-version` prevents inside the
+/// repo — just at the release boundary. A leading `v` is accepted.
+fn check_tag(root: &Path, tag: &str) -> Result<(), Box<dyn Error>> {
+    let version = cargo_version(root)?;
+    let tag_version = tag.trim().trim_start_matches('v');
+
+    if tag_version == version {
+        println!("  ok      tag '{tag}' matches Cargo.toml ({version})");
+        return Ok(());
+    }
+
+    Err(format!(
+        "release tag '{tag}' does not match the Cargo.toml version '{version}'.\n\
+         Bump with `cargo set-version {tag_version} && cargo xtask sync-version`, \
+         or retag the release."
+    )
+    .into())
 }
 
 /// Runs every check, reporting all failures rather than stopping at the first,

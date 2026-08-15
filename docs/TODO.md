@@ -19,21 +19,21 @@ aber noch nicht deployed. Live läuft weiterhin v1.2.0.
   Übersicht liegt auf `/help`
 - Fehlerantworten haben ein zusätzliches `code`-Feld (additiv, nicht brechend)
 
-**Deployment erst, wenn alles deckungsgleich ist.** Vorher durchlaufen:
+**Das Gate läuft automatisch.** `release.yml` prüft vor jedem Upload Tests,
+Versions-Konsistenz, Fehlercodes und ob der Release-Tag zur Crate-Version passt.
+Schlägt es fehl, wird nichts veröffentlicht.
+
+Lokal vorab prüfbar:
 
 ```bash
-cargo test           # muss grün sein
-cargo xtask check    # Versionen + Fehlercodes ohne Drift
+cargo test
+cargo xtask check
+cargo xtask check-tag v2.0.0
 ```
 
-Danach: Docker-Image bauen, nach GHCR pushen, `kern.lukasbaumert.de` aktualisieren.
-
-### `cargo xtask check` in CI verdrahten
-
-Die Checks existieren, laufen aber noch nicht automatisch. Solange das so ist,
-ist es ein manueller Schritt vor jedem Release — also genau die Sorgfalt, die
-laut PRINCIPLES §4 durch Werkzeug ersetzt gehört. Gehört in
-`.github/workflows/rust.yml`.
+Zum Ausliefern: Release mit Tag `v2.0.0` und `[SERVER]` im Body anlegen — der
+Workflow baut die Binaries und pusht das Docker-Image nach GHCR. Danach
+`kern.lukasbaumert.de` auf das neue Image ziehen.
 
 ### Referenz-Dokumentation vervollständigen
 

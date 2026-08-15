@@ -8,8 +8,46 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ---- 0) Konsistenz-Gate -------------------------------------------------
+  # Nichts wird veröffentlicht, bevor das hier grün ist. Deckt ab:
+  #   - Tests
+  #   - Version in allen abgeleiteten Dateien identisch
+  #   - dokumentierte Fehlercodes == tatsächlich ausgegebene
+  #   - Release-Tag == Cargo.toml-Version
+  # Ohne das könnte ein Release als v2.0.0 getaggt sein und Binaries
+  # ausliefern, die sich als 1.2.0 melden. Siehe docs/PRINCIPLES.md.
+  consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust (nightly)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          default: true
+
+      - name: Consistency checks
+        run: cargo xtask check
+
+      - name: Release tag matches the crate version
+        run: cargo xtask check-tag "${{ github.ref_name }}"
+
+      - name: Tests
+        run: cargo test
+
   # ---- 1) Windows-Builds (CLI & Server) per Matrix ------------------------
   build-win:
+    needs: consistency
     if: contains(github.event.release.body, '[KERN]') || contains(github.event.release.body, '[SERVER]')
     runs-on: windows-latest
     strategy:

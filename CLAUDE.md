@@ -113,15 +113,20 @@ Available ciphers include: Ordinal, Reverse Ordinal, Pythagorean, Reverse Pythag
 truth; every other occurrence is derived and written by the tool.
 
 ```bash
-cargo xtask check              # all consistency checks, writes nothing (CI gate)
+cargo xtask check              # all consistency checks, writes nothing
 cargo set-version 2.1.0        # bump the source of truth (cargo-edit)
 cargo xtask sync-version       # write it into README + OpenAPI spec
 cargo xtask check-error-codes  # ErrorCode::API vs. the OpenAPI spec
+cargo xtask check-tag v2.1.0   # release tag vs. the crate version
 ```
 
 `cargo set-version` alone is not enough — it only knows `Cargo.toml`. Add new
 derived locations to the `DERIVED` table in `xtask/src/main.rs` rather than
 updating them by hand.
+
+`cargo xtask check` runs in CI (`rust.yml`) on every PR to master, and gates
+`release.yml`: if it or `check-tag` fails, no binaries and no Docker image are
+published.
 
 Full detail: `docs/reference/tooling.md`.
 
