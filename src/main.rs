@@ -2,8 +2,8 @@ use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
     Cipher, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline, Step, StepMetadata,
-    default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen_lang,
-    parse_range,
+    ErrorCode, default_cipher, descriptors, generate_matrix_pairs, get_cipher,
+    load_bedeutungen_lang, parse_range,
 };
 use kern::ui;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,7 @@ impl OutputMode {
 /// Error response for JSON mode
 #[derive(Serialize)]
 struct ErrorResponse {
+    code: ErrorCode,
     error: String,
 }
 
@@ -221,8 +222,10 @@ fn main() {
                 .value_name("CODE")
                 .num_args(1)
                 .help(
-                    "Language of the meanings: de (default), en, fr. \
-                     Affects lookup and date output only; calculations are language independent",
+                    "Content language: en (default), de, fr. Meanings exist in all three; \
+                     SPEKTRA and RTAP prompts only in en and de, and an unavailable \
+                     language is rejected rather than substituted. \
+                     Calculations are language independent",
                 ),
         )
         .arg(
@@ -319,7 +322,7 @@ fn main() {
     let lang = match matches.get_one::<String>("lang") {
         Some(raw) => match raw.parse::<Lang>() {
             Ok(lang) => lang,
-            Err(msg) => output_error(&msg, is_tty),
+            Err(msg) => output_error(ErrorCode::UnsupportedLanguage, &msg, is_tty),
         },
         None => Lang::default(),
     };
@@ -331,7 +334,7 @@ fn main() {
                 let inputs: Vec<String> =
                     values.map(|s| s.to_string()).collect();
                 if inputs.is_empty() {
-                    output_error("index requires at least one input", is_tty);
+                    output_error(ErrorCode::InputMissing, "index requires at least one input", is_tty);
                 }
                 let mut json_items = Vec::new();
                 for input in &inputs {
@@ -362,7 +365,7 @@ fn main() {
                     }
                 }
             }
-            None => output_error("index requires at least one input", is_tty),
+            None => output_error(ErrorCode::InputMissing, "index requires at least one input", is_tty),
         }
         return;
     }
@@ -394,7 +397,8 @@ fn main() {
                             .map(|d| format!("{} ({})", d.name, d.short))
                             .collect();
                         output_error(
-                            &format!("Unknown cipher: {}. Available: {}", value, available.join(", ")),
+                            ErrorCode::UnknownCipher,
+                            &format!("unknown cipher: {}. available: {}", value, available.join(", ")),
                             is_tty,
                         );
                     }
@@ -559,7 +563,7 @@ fn main() {
                     }
                 }
             }
-            Err(e) => output_error(&e, is_tty),
+            Err(e) => output_error(ErrorCode::InvalidRange, &e, is_tty),
         }
         return; // Date processing complete, exit early
     }
@@ -571,7 +575,7 @@ fn main() {
             let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
             
             if raw_tokens.is_empty() {
-                output_error("--spektra requires a word argument", is_tty);
+                output_error(ErrorCode::WordMissing, "--spektra requires a word argument", is_tty);
             }
 
             // Only use the first word for spektra analysis
@@ -617,6 +621,7 @@ fn main() {
             // substitution — an unavailable language aborts.
             if !lang.has_prompts() {
                 output_error(
+                    ErrorCode::LanguageNotAvailable,
                     &format!(
                         "SPEKTRA prompt is not available in '{lang}'. available: {}",
                         Lang::prompt_langs()
@@ -641,7 +646,7 @@ fn main() {
                     }
                 }
                 Err(e) => {
-                    output_error(&format!("Error building spektra prompt: {}", e), is_tty);
+                    output_error(ErrorCode::SpektraFailed, &format!("error building spektra prompt: {e}"), is_tty);
                 }
             }
         }
@@ -655,8 +660,9 @@ fn main() {
             Ok(1) | Ok(2) => rtap_part.parse::<u8>().unwrap(),
             _ => {
                 output_error(
-                    &format!("Invalid RTAP part number: {}. Must be 1 or 2", rtap_part),
-                    is_tty
+                    ErrorCode::InvalidRtapPart,
+                    &format!("invalid part number: {rtap_part}. must be 1 or 2"),
+                    is_tty,
                 );
             }
         };
@@ -665,6 +671,7 @@ fn main() {
         let prompts = match kern::core::load_rtap_prompts_lang(lang) {
             Some(prompts) => prompts,
             None => output_error(
+                ErrorCode::LanguageNotAvailable,
                 &format!(
                     "RTAP prompts are not available in '{lang}'. available: {}",
                     Lang::prompt_langs()
@@ -683,8 +690,9 @@ fn main() {
             }
             None => {
                 output_error(
-                    &format!("RTAP prompt {} not found in configuration", part_num),
-                    is_tty
+                    ErrorCode::RtapPromptMissing,
+                    &format!("RTAP prompt {part_num} not found in configuration"),
+                    is_tty,
                 );
             }
         }
@@ -698,8 +706,8 @@ fn main() {
 
         let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map, show_pmr) {
             Ok(data) => data,
-            Err(err) => {
-                output_error(&err, is_tty);
+            Err((code, err)) => {
+                output_error(code, &err, is_tty);
             }
         };
 
@@ -938,13 +946,17 @@ fn main() {
 /// Output error message and exit
 /// In TTY mode: prints to stderr
 /// In pipe mode: prints JSON error to stdout
-fn output_error(message: &str, is_tty: bool) -> ! {
+/// Aborts with `message`. In pipe mode the JSON carries the same `code` field
+/// the server emits, so a consumer can branch identically no matter which one
+/// it called — see docs/PRINCIPLES.md §3.
+fn output_error(code: ErrorCode, message: &str, is_tty: bool) -> ! {
     if is_tty {
         eprintln!("{}", message);
         std::process::exit(1);
     } else {
         // Pipe mode: JSON to stdout
         let error = ErrorResponse {
+            code,
             error: message.to_string(),
         };
         if let Ok(json) = serde_json::to_string(&error) {
@@ -1223,11 +1235,14 @@ struct PhaseInput {
 
 /// Parse tokens into a list of input strings and steps.
 /// If phase_mode is true, creates PhaseRelation steps for all pairs.
+/// Errors carry their own [`ErrorCode`] rather than collapsing into one, so the
+/// CLI reports the same code the server would for the same situation
+/// (docs/PRINCIPLES.md §6).
 fn parse_pipeline_tokens(
     tokens: &[String],
     _cipher_aliases: &HashMap<String, String>,
     phase_mode: bool,
-) -> Result<ParsedPipeline, String> {
+) -> Result<ParsedPipeline, (ErrorCode, String)> {
     let mut inputs = Vec::new();
     let mut steps = Vec::new();
     let mut saw_total = false;
@@ -1252,15 +1267,25 @@ fn parse_pipeline_tokens(
     // If we're in phase relation mode
     if phase_mode {
         if inputs.len() < 2 {
-            return Err("Phase relation matrix requires at least 2 inputs".to_string());
+            // Same code the server returns for this situation.
+            return Err((
+                ErrorCode::InsufficientInputs,
+                "phase relation matrix requires at least 2 inputs".to_string(),
+            ));
         }
 
         // --total and --lookup are not supported with phase relations (for now)
         if saw_total {
-            return Err("--total is not supported with phase relation mode".to_string());
+            return Err((
+                ErrorCode::InvalidArguments,
+                "--total is not supported with phase relation mode".to_string(),
+            ));
         }
         if saw_lookup {
-            return Err("--lookup is not supported with phase relation mode".to_string());
+            return Err((
+                ErrorCode::InvalidArguments,
+                "--lookup is not supported with phase relation mode".to_string(),
+            ));
         }
 
         // Generate matrix pairs from all inputs

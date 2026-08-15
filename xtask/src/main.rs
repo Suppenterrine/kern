@@ -17,25 +17,114 @@ fn main() {
 
 const USAGE: &str = "\
 Usage:
+  cargo xtask check                    Run every consistency check (CI gate)
   cargo xtask sync-version [--check]   Write the Cargo.toml version into all derived files
+  cargo xtask check-error-codes        Verify the OpenAPI spec matches ErrorCode::API
   cargo xtask bump version <major|minor|patch>
 
-`sync-version --check` writes nothing and exits non-zero if any file has drifted,
-which makes it usable as a CI gate.";
+The --check forms write nothing and exit non-zero on drift.";
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     let root = find_project_root()?;
 
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        ["check"] => check_all(&root),
         ["sync-version"] => sync_version(&root, false),
         ["sync-version", "--check"] => sync_version(&root, true),
+        ["check-error-codes"] => check_error_codes(&root),
         ["bump", "version", kind] => bump(&root, kind),
         _ => {
             eprintln!("{USAGE}");
             std::process::exit(1);
         }
     }
+}
+
+/// Runs every check, reporting all failures rather than stopping at the first,
+/// so one run tells you everything that needs fixing.
+fn check_all(root: &Path) -> Result<(), Box<dyn Error>> {
+    let mut failures = Vec::new();
+
+    println!("== version sync ==");
+    if let Err(e) = sync_version(root, true) {
+        failures.push(format!("sync-version: {e}"));
+    }
+
+    println!("\n== error codes ==");
+    if let Err(e) = check_error_codes(root) {
+        failures.push(format!("check-error-codes: {e}"));
+    }
+
+    if failures.is_empty() {
+        println!("\nall checks passed");
+        return Ok(());
+    }
+
+    Err(format!("{} check(s) failed:\n  - {}", failures.len(), failures.join("\n  - ")).into())
+}
+
+/// Verifies that the OpenAPI spec documents exactly the error codes the HTTP
+/// API can emit.
+///
+/// The expected set comes from `ErrorCode::API` in the library, not from
+/// scraping the server source, so the check reflects what can actually be
+/// returned. CLI-only codes are excluded by construction — they are not part of
+/// the HTTP contract.
+fn check_error_codes(root: &Path) -> Result<(), Box<dyn Error>> {
+    use kern::core::ErrorCode;
+
+    let spec_path = root.join("api/kern.definition.yaml");
+    let spec: serde_yaml::Value = serde_yaml::from_str(&fs::read_to_string(&spec_path)?)?;
+
+    let documented = spec
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .and_then(|s| s.get("ErrorResponse"))
+        .and_then(|e| e.get("properties"))
+        .and_then(|p| p.get("code"))
+        .and_then(|c| c.get("enum"))
+        .and_then(|e| e.as_sequence())
+        .ok_or("could not find components.schemas.ErrorResponse.properties.code.enum in the spec")?
+        .iter()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let expected = ErrorCode::API
+        .iter()
+        .map(|c| c.as_str().to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    let undocumented: Vec<_> = expected.difference(&documented).cloned().collect();
+    let stale: Vec<_> = documented.difference(&expected).cloned().collect();
+
+    if undocumented.is_empty() && stale.is_empty() {
+        println!("  ok      {} API error codes match the spec", expected.len());
+        return Ok(());
+    }
+
+    let mut problems = Vec::new();
+    if !undocumented.is_empty() {
+        problems.push(format!(
+            "emitted but not in the spec: {}",
+            undocumented.join(", ")
+        ));
+    }
+    if !stale.is_empty() {
+        problems.push(format!(
+            "in the spec but never emitted: {}",
+            stale.join(", ")
+        ));
+    }
+    for p in &problems {
+        println!("  DRIFT   {p}");
+    }
+
+    Err(format!(
+        "error codes out of sync:\n  - {}\nupdate ErrorResponse.properties.code.enum in api/kern.definition.yaml",
+        problems.join("\n  - ")
+    )
+    .into())
 }
 
 /// A file that repeats the version, and how to find it there.

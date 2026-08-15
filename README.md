@@ -501,7 +501,8 @@ $ kern --lang de --rtap 1
 
 ## Fehlerformat
 
-Jeder Fehler liefert einen stabilen `code` und einen menschenlesbaren `error`-Text:
+Jeder Fehler liefert einen stabilen `code` und einen menschenlesbaren `error`-Text
+— **von API und CLI gleichermaßen**, im selben Format:
 
 ```json
 {"code": "invalid_range", "error": "invalid range specification"}
@@ -509,6 +510,9 @@ Jeder Fehler liefert einen stabilen `code` und einen menschenlesbaren `error`-Te
 
 **Gegen `code` programmieren, nicht gegen `error`** — der Text ist Prosa und
 kann jederzeit umformuliert werden, der Code nicht.
+
+Im TTY-Modus gibt das CLI stattdessen Klartext auf stderr aus und beendet mit
+Exit-Code 1. Vollständige Referenz: [docs/reference/error-codes.md](docs/reference/error-codes.md).
 
 | Code | Bedeutung |
 |------|-----------|
@@ -524,6 +528,7 @@ kann jederzeit umformuliert werden, der Code nicht.
 | `invalid_rtap_part` | `part` muss 1, 2 oder `both` sein |
 | `rtap_prompt_missing` | RTAP-Prompt nicht in der Konfiguration |
 | `spektra_failed` | SPEKTRA-Prompt konnte nicht erzeugt werden |
+| `invalid_arguments` | Nur CLI: Argumente oder Flag-Kombination nicht interpretierbar |
 
 **Neue Sprache hinzufügen:**
 

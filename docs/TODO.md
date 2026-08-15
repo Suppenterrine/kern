@@ -19,31 +19,30 @@ aber noch nicht deployed. Live läuft weiterhin v1.2.0.
   Übersicht liegt auf `/help`
 - Fehlerantworten haben ein zusätzliches `code`-Feld (additiv, nicht brechend)
 
-Offen: Docker-Image bauen, nach GHCR pushen, `kern.lukasbaumert.de` aktualisieren.
-
-### CLI-Fehler ohne `code`-Feld
-
-Die API liefert `{"code": "...", "error": "..."}`, das CLI im Pipe-Modus nur
-`{"error": "..."}`. Wer beide Wege konsumiert, muss zwei Formate behandeln.
-Das CLI sollte dieselben Codes mitgeben.
-
-### Fehler-Codes gegen die Spec testen
-
-Code und Spec stimmen aktuell exakt überein (12 Codes), aber nichts erzwingt das.
-Der Abgleich gehört als weiterer `xtask`-Check neben `sync-version`, damit er
-wie die Versionen deterministisch statt per Sorgfalt läuft (PRINCIPLES §4).
-
-Manueller Abgleich bis dahin:
+**Deployment erst, wenn alles deckungsgleich ist.** Vorher durchlaufen:
 
 ```bash
-python -c "
-import re,yaml
-emitted=set(re.findall(r'(?:bad_request|server_error)\(\s*\"([a-z_]+)\"',
-            open('src/bin/kern-server.rs',encoding='utf-8').read()))
-spec=yaml.safe_load(open('api/kern.definition.yaml',encoding='utf-8'))
-doc=set(spec['components']['schemas']['ErrorResponse']['properties']['code']['enum'])
-print('OK' if emitted==doc else f'DRIFT: {emitted^doc}')"
+cargo test           # muss grün sein
+cargo xtask check    # Versionen + Fehlercodes ohne Drift
 ```
+
+Danach: Docker-Image bauen, nach GHCR pushen, `kern.lukasbaumert.de` aktualisieren.
+
+### `cargo xtask check` in CI verdrahten
+
+Die Checks existieren, laufen aber noch nicht automatisch. Solange das so ist,
+ist es ein manueller Schritt vor jedem Release — also genau die Sorgfalt, die
+laut PRINCIPLES §4 durch Werkzeug ersetzt gehört. Gehört in
+`.github/workflows/rust.yml`.
+
+### Referenz-Dokumentation vervollständigen
+
+`docs/reference/` deckt bisher Tooling, Lokalisierung und Fehlercodes ab. Offen
+sind Flow-Engine, Chiffren, Phase, SPEKTRA-Achsen, UI und der
+TTY-/Pipe-Unterschied — die Liste steht in `docs/reference/README.md`.
+
+Nicht als Block nachziehen: Wer eines dieser Module anfasst, dokumentiert es
+dabei (PRINCIPLES §7).
 
 ### `CARGO_TARGET_DIR` global entfernen
 

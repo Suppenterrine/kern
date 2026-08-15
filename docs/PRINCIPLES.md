@@ -95,7 +95,49 @@ ob es Prompts dafür gibt — statt versehentlich englische zu erben.
 
 ---
 
-## 6. Ehrlich berichten
+## 6. CLI und Server bleiben deckungsgleich
+
+Beide Binaries sind Zugänge zu **derselben** Fachlichkeit. Was der eine kann,
+kann der andere; was der eine meldet, meldet der andere gleich.
+
+Deckungsgleichheit wird strukturell hergestellt, nicht durch paralleles Pflegen:
+gemeinsame Logik liegt in der Bibliothek, nicht doppelt in den Binaries.
+
+- Fehlercodes: ein `ErrorCode`-Enum in `src/lib.rs`, von beiden benutzt. Beide
+  geben `{"code": …, "error": …}` aus.
+- Sprachauflösung: `Lang::parse`, `has_prompts()` und die
+  `Option`-liefernden Quellfunktionen liegen in der Bibliothek.
+- Neue Fähigkeiten werden in beiden Zugängen bedacht. Wenn ein Zugang sie
+  bewusst nicht bekommt, steht der Grund in `docs/reference/`.
+
+Wo ein Unterschied sachlich gerechtfertigt ist — das CLI hat Flags, die API
+nicht —, wird er **explizit modelliert** statt verwischt: darum trennt
+`ErrorCode` zwischen `ALL` und `API`, statt einen CLI-Fehlerfall in einen
+unpassenden API-Code zu pressen.
+
+---
+
+## 7. Dokumentation wandert mit dem Code
+
+Wer ein Modul ändert, aktualisiert im selben Zug seine Referenz unter
+`docs/reference/`. Nicht später, nicht in einem eigenen Durchgang.
+
+Dokumentation, die dem Code hinterherhinkt, ist schlimmer als keine: sie wird
+geglaubt. Ein falscher Satz in der Referenz kostet mehr Zeit, als er je gespart
+hat.
+
+- `docs/reference/` beschreibt den **Aufbau** — wie etwas gebaut ist und warum.
+- Das README beschreibt die **Benutzung**.
+- `docs/PRINCIPLES.md` beschreibt die **Regeln**.
+- `docs/TODO.md` beschreibt, was **offen** ist.
+
+Was noch nicht dokumentiert ist, wird als offen benannt — siehe die Liste in
+`docs/reference/README.md`. Eine Referenz, die vollständig aussieht, es aber
+nicht ist, verstößt gegen Prinzip 8.
+
+---
+
+## 8. Ehrlich berichten
 
 Was nicht getan wurde, wird gesagt. Was nur teilweise funktioniert, wird als
 teilweise beschrieben. Ein grüner Testlauf, der die fragliche Stelle nicht

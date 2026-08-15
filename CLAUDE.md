@@ -107,25 +107,44 @@ Available ciphers include: Ordinal, Reverse Ordinal, Pythagorean, Reverse Pythag
 - `bedeutungen.fr.yaml`: French meanings (numeric keys only — no prompts)
 - `spektra_prompt.txt` / `spektra_prompt.en.txt`: German and English SPEKTRA templates
 
-### Versioning
+### Tooling and versioning
 
 **Never edit a version number by hand.** `Cargo.toml` is the single source of
-truth; every other occurrence is derived.
+truth; every other occurrence is derived and written by the tool.
 
 ```bash
-cargo set-version 2.1.0        # bump the source of truth
+cargo xtask check              # all consistency checks, writes nothing (CI gate)
+cargo set-version 2.1.0        # bump the source of truth (cargo-edit)
 cargo xtask sync-version       # write it into README + OpenAPI spec
-cargo xtask sync-version --check   # verify, writes nothing (CI gate)
+cargo xtask check-error-codes  # ErrorCode::API vs. the OpenAPI spec
 ```
 
-Add new derived locations to the `DERIVED` table in `xtask/src/main.rs` rather
-than updating them by hand.
+`cargo set-version` alone is not enough — it only knows `Cargo.toml`. Add new
+derived locations to the `DERIVED` table in `xtask/src/main.rs` rather than
+updating them by hand.
 
-### Project Principles
+Full detail: `docs/reference/tooling.md`.
 
-`docs/PRINCIPLES.md` holds the binding design rules (no silent fallbacks,
-single source of truth, exhaustive matches over catch-all arms). Read it before
-changing error handling, fallback behaviour, or anything version related.
+### Documentation layout
+
+| Where | What |
+|-------|------|
+| `README.md` | Usage |
+| `docs/PRINCIPLES.md` | Binding design rules |
+| `docs/reference/` | How each module is built, and why |
+| `docs/TODO.md` | Open work |
+
+**Docs travel with the code** (PRINCIPLES §7): changing a module means updating
+its reference in the same change. `docs/reference/README.md` lists which modules
+are still undocumented — extend it rather than letting the reference look
+complete when it is not.
+
+### Project principles
+
+`docs/PRINCIPLES.md` holds the binding design rules: no silent fallbacks, single
+source of truth, CLI/server parity, exhaustive matches over catch-all arms,
+docs travel with the code. **Read it before** changing error handling, fallback
+behaviour, anything version related, or adding a capability to only one binary.
 
 ### Data Flow
 
@@ -215,13 +234,20 @@ substituted. Do not "helpfully" add a fallback; it is a deliberate design rule.
 - Responses carry a `lang` field naming the language used, which is always the
   language that was requested.
 
-### API Errors
+### Errors
 
-Every error carries a stable `code` plus human-readable `error` prose. Clients
-branch on `code`; the prose may be reworded. Construct errors via the
-`bad_request` / `server_error` helpers in `src/bin/kern-server.rs` so the shape
-stays uniform. When adding a code, add it to the `ErrorResponse` enum in
-`api/kern.definition.yaml` — the two are expected to match exactly.
+Every error from **both** binaries carries a stable `code` plus human-readable
+`error` prose. Clients branch on `code`; the prose may be reworded.
+
+- Codes are the `ErrorCode` enum in `src/lib.rs`, shared by CLI and server. It
+  is an enum, not free strings, so an undeclared code cannot be emitted.
+- `ErrorCode::API` is the subset the HTTP API can return and must match
+  `api/kern.definition.yaml` exactly — enforced by `cargo xtask check-error-codes`.
+- `ErrorCode::ALL` additionally holds CLI-only codes (`invalid_arguments`).
+- Server: construct via `bad_request` / `server_error`. CLI: via `output_error`.
+- Error text is always English regardless of `lang`.
+
+Full detail: `docs/reference/error-codes.md`.
 
 ### Adding a language
 

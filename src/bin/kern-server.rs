@@ -6,8 +6,8 @@ use axum::{
 };
 use chrono::{Duration, Local};
 use kern::core::{
-    Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline, Step,
-    StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_all_bedeutungen,
+    Bedeutung, Cipher, ErrorCode, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline,
+    Step, StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_all_bedeutungen,
     lookup_lang, parse_range, reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
@@ -41,7 +41,7 @@ fn resolve_lang(raw: Option<&str>) -> Result<Lang, ApiError> {
         None => Ok(Lang::default()),
         Some(tag) => Lang::parse(tag).ok_or_else(|| {
             bad_request(
-                "unsupported_language",
+                ErrorCode::UnsupportedLanguage,
                 format!(
                     "unsupported language '{tag}'. supported: {}",
                     Lang::supported()
@@ -60,7 +60,7 @@ fn resolve_prompt_lang(raw: Option<&str>) -> Result<Lang, ApiError> {
     let lang = resolve_lang(raw)?;
     if !lang.has_prompts() {
         return Err(bad_request(
-            "language_not_available",
+            ErrorCode::LanguageNotAvailable,
             format!(
                 "prompts are not available in '{}'. available: {}",
                 lang.code(),
@@ -282,13 +282,13 @@ struct ReduceResponse {
 /// of the protocol.
 #[derive(Serialize)]
 struct ErrorResponse {
-    code: &'static str,
+    code: ErrorCode,
     error: String,
 }
 
 type ApiError = (StatusCode, Json<ErrorResponse>);
 
-fn bad_request(code: &'static str, error: impl Into<String>) -> ApiError {
+fn bad_request(code: ErrorCode, error: impl Into<String>) -> ApiError {
     (
         StatusCode::BAD_REQUEST,
         Json(ErrorResponse {
@@ -298,7 +298,7 @@ fn bad_request(code: &'static str, error: impl Into<String>) -> ApiError {
     )
 }
 
-fn server_error(code: &'static str, error: impl Into<String>) -> ApiError {
+fn server_error(code: ErrorCode, error: impl Into<String>) -> ApiError {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(ErrorResponse {
@@ -315,7 +315,7 @@ async fn reduce_handler(
         .input
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| bad_request("input_missing", "input parameter missing"))?;
+        .ok_or_else(|| bad_request(ErrorCode::InputMissing, "input parameter missing"))?;
 
     // Parse inputs (comma-separated)
     let inputs: Vec<&str> = input
@@ -325,7 +325,7 @@ async fn reduce_handler(
         .collect();
 
     if inputs.is_empty() {
-        return Err(bad_request("no_valid_inputs", "no valid inputs provided"));
+        return Err(bad_request(ErrorCode::NoValidInputs, "no valid inputs provided"));
     }
 
     // Parse cipher parameter
@@ -353,7 +353,7 @@ async fn reduce_handler(
     // Validate cipher codes if provided
     if use_multi_cipher && cipher_codes.is_empty() {
         return Err(bad_request(
-            "no_valid_ciphers",
+            ErrorCode::NoValidCiphers,
             "cipher parameter provided but no valid cipher codes found",
         ));
     }
@@ -367,7 +367,7 @@ async fn reduce_handler(
                 Some(descriptor) => result.push((descriptor.factory)()),
                 None => {
                     return Err(bad_request(
-                        "unknown_cipher",
+                        ErrorCode::UnknownCipher,
                         format!("unknown cipher code: {code}"),
                     ));
                 }
@@ -662,7 +662,7 @@ async fn index_handler(
         .input
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| bad_request("input_missing", "input parameter missing"))?;
+        .ok_or_else(|| bad_request(ErrorCode::InputMissing, "input parameter missing"))?;
 
     let mut items = Vec::new();
     for word in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -717,7 +717,7 @@ async fn date_handler(
     let lang = resolve_lang(params.lang.as_deref())?;
     let map = state.map(lang);
 
-    let offsets = parse_range(&params.range).map_err(|e| bad_request("invalid_range", e))?;
+    let offsets = parse_range(&params.range).map_err(|e| bad_request(ErrorCode::InvalidRange, e))?;
     let today = Local::now().date_naive();
     let mut dates = Vec::new();
     for off in offsets {
@@ -764,7 +764,7 @@ async fn spektra_handler(
         .word
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| bad_request("word_missing", "word parameter missing"))?;
+        .ok_or_else(|| bad_request(ErrorCode::WordMissing, "word parameter missing"))?;
 
     // The prompt exists in German and English only; anything else is rejected.
     // The meanings woven in must match the prompt language.
@@ -817,7 +817,7 @@ async fn spektra_handler(
             prompt,
         })),
         Err(e) => Err(server_error(
-            "spektra_failed",
+            ErrorCode::SpektraFailed,
             format!("error building spektra prompt: {e}"),
         )),
     }
@@ -886,7 +886,7 @@ async fn phase_handler(
 
     if inputs.len() < 2 {
         return Err(bad_request(
-            "insufficient_inputs",
+            ErrorCode::InsufficientInputs,
             "phase relation matrix requires at least 2 inputs",
         ));
     }
@@ -920,7 +920,7 @@ async fn phase_handler(
             Some(descriptor) => ciphers.push((descriptor.factory)()),
             None => {
                 return Err(bad_request(
-                    "unknown_cipher",
+                    ErrorCode::UnknownCipher,
                     format!("unknown cipher code: {code}"),
                 ));
             }
@@ -999,7 +999,7 @@ async fn rtap_handler(
                 }
                 None => {
                     return Err(server_error(
-                        "rtap_prompt_missing",
+                        ErrorCode::RtapPromptMissing,
                         format!("RTAP prompt {part_num} not found"),
                     ));
                 }
@@ -1014,14 +1014,14 @@ async fn rtap_handler(
     } else {
         let part_num = part_str.parse::<u8>().map_err(|_| {
             bad_request(
-                "invalid_rtap_part",
+                ErrorCode::InvalidRtapPart,
                 format!("invalid part number: {part_str}. must be 1, 2, or 'both'"),
             )
         })?;
 
         if part_num != 1 && part_num != 2 {
             return Err(bad_request(
-                "invalid_rtap_part",
+                ErrorCode::InvalidRtapPart,
                 format!("invalid part number: {part_num}. must be 1 or 2"),
             ));
         }
@@ -1036,7 +1036,7 @@ async fn rtap_handler(
                 Ok(Json(serde_json::to_value(response).unwrap()))
             }
             None => Err(server_error(
-                "rtap_prompt_missing",
+                ErrorCode::RtapPromptMissing,
                 format!("RTAP prompt {part_num} not found in configuration"),
             )),
         }

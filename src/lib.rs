@@ -19,6 +19,106 @@ pub mod core {
         pub schatten: Option<String>,
     }
 
+    /// Stable, machine-readable error identifiers shared by the CLI and the
+    /// server, so both report the same failure the same way.
+    ///
+    /// This is an enum rather than free-standing strings on purpose: a code
+    /// that is not declared here cannot be emitted, which is what lets
+    /// `cargo xtask check-error-codes` verify the OpenAPI spec against
+    /// [`ErrorCode::ALL`] and actually mean it.
+    ///
+    /// Codes are API surface. Renaming one is a breaking change for consumers;
+    /// the human-readable message next to it is not and may be reworded freely.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+    #[serde(into = "&'static str")]
+    pub enum ErrorCode {
+        InputMissing,
+        NoValidInputs,
+        NoValidCiphers,
+        UnknownCipher,
+        UnsupportedLanguage,
+        LanguageNotAvailable,
+        InvalidRange,
+        WordMissing,
+        InsufficientInputs,
+        InvalidRtapPart,
+        RtapPromptMissing,
+        SpektraFailed,
+        /// CLI only: the argument list or flag combination could not be
+        /// interpreted. The HTTP API has no equivalent — it has no flags.
+        InvalidArguments,
+    }
+
+    impl ErrorCode {
+        /// Every code either binary can emit.
+        pub const ALL: [ErrorCode; 13] = [
+            ErrorCode::InputMissing,
+            ErrorCode::NoValidInputs,
+            ErrorCode::NoValidCiphers,
+            ErrorCode::UnknownCipher,
+            ErrorCode::UnsupportedLanguage,
+            ErrorCode::LanguageNotAvailable,
+            ErrorCode::InvalidRange,
+            ErrorCode::WordMissing,
+            ErrorCode::InsufficientInputs,
+            ErrorCode::InvalidRtapPart,
+            ErrorCode::RtapPromptMissing,
+            ErrorCode::SpektraFailed,
+            ErrorCode::InvalidArguments,
+        ];
+
+        /// Codes the HTTP API can return. `cargo xtask check-error-codes`
+        /// requires this to match the OpenAPI spec exactly.
+        ///
+        /// Kept separate from [`ErrorCode::ALL`] so a CLI-only failure mode can
+        /// be modelled honestly instead of being forced into an ill-fitting API
+        /// code just to keep one list tidy.
+        pub const API: [ErrorCode; 12] = [
+            ErrorCode::InputMissing,
+            ErrorCode::NoValidInputs,
+            ErrorCode::NoValidCiphers,
+            ErrorCode::UnknownCipher,
+            ErrorCode::UnsupportedLanguage,
+            ErrorCode::LanguageNotAvailable,
+            ErrorCode::InvalidRange,
+            ErrorCode::WordMissing,
+            ErrorCode::InsufficientInputs,
+            ErrorCode::InvalidRtapPart,
+            ErrorCode::RtapPromptMissing,
+            ErrorCode::SpektraFailed,
+        ];
+
+        pub fn as_str(self) -> &'static str {
+            match self {
+                ErrorCode::InputMissing => "input_missing",
+                ErrorCode::NoValidInputs => "no_valid_inputs",
+                ErrorCode::NoValidCiphers => "no_valid_ciphers",
+                ErrorCode::UnknownCipher => "unknown_cipher",
+                ErrorCode::UnsupportedLanguage => "unsupported_language",
+                ErrorCode::LanguageNotAvailable => "language_not_available",
+                ErrorCode::InvalidRange => "invalid_range",
+                ErrorCode::WordMissing => "word_missing",
+                ErrorCode::InsufficientInputs => "insufficient_inputs",
+                ErrorCode::InvalidRtapPart => "invalid_rtap_part",
+                ErrorCode::RtapPromptMissing => "rtap_prompt_missing",
+                ErrorCode::SpektraFailed => "spektra_failed",
+                ErrorCode::InvalidArguments => "invalid_arguments",
+            }
+        }
+    }
+
+    impl From<ErrorCode> for &'static str {
+        fn from(code: ErrorCode) -> Self {
+            code.as_str()
+        }
+    }
+
+    impl fmt::Display for ErrorCode {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.as_str())
+        }
+    }
+
     /// Content language of the meanings knowledge base.
     ///
     /// Only the meanings (`bedeutung`/`lichtseite`/`schattenseite`) are
@@ -366,6 +466,45 @@ pub mod core {
         #[test]
         fn alphabet_index_case_insensitive() {
             assert_eq!(alphabet_index("AbC"), vec![('A', 1), ('B', 2), ('C', 3)]);
+        }
+
+        #[test]
+        fn error_code_strings_are_unique_and_well_formed() {
+            let mut seen = std::collections::HashSet::new();
+            for code in ErrorCode::ALL {
+                let s = code.as_str();
+                assert!(!s.is_empty(), "{code:?} has an empty string");
+                assert!(
+                    s.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                    "{s} must be lower_snake_case — codes are API surface"
+                );
+                assert!(seen.insert(s), "duplicate error code string: {s}");
+            }
+        }
+
+        /// `API` must be a subset of `ALL`, and every code not in `API` must be
+        /// a deliberate CLI-only one. Guards against a new API code being added
+        /// to `ALL` but forgotten in `API`, which would slip past the
+        /// spec check in xtask.
+        #[test]
+        fn api_error_codes_are_a_subset_of_all() {
+            for code in ErrorCode::API {
+                assert!(
+                    ErrorCode::ALL.contains(&code),
+                    "{code:?} is in API but missing from ALL"
+                );
+            }
+
+            let cli_only: Vec<_> = ErrorCode::ALL
+                .iter()
+                .filter(|c| !ErrorCode::API.contains(c))
+                .copied()
+                .collect();
+            assert_eq!(
+                cli_only,
+                vec![ErrorCode::InvalidArguments],
+                "the set of CLI-only codes changed; update this test and docs/reference/error-codes.md deliberately"
+            );
         }
 
         #[test]
