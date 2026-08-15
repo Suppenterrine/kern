@@ -22,6 +22,10 @@ target
 
 gh-notes.txt
 vision_notes.txt
-release*notes.*
+# Lokale Notiz-Entwürfe. Bewusst breit: `release*notes.*` verlangte den Punkt
+# direkt hinter "notes" und ließ versionierte Namen wie
+# release_notes_v1.2.0.md durchrutschen. Die veröffentlichten Notes stehen im
+# GitHub-Release, nicht im Repo.
+release*notes*
 .claude/
 nul
