@@ -6,34 +6,40 @@ Offene Punkte für KERN. Erledigtes wird entfernt, nicht abgehakt.
 
 ## Offen
 
-### v2.0.0 deployen
+### v2.0.0 auf den Live-Host ziehen
 
-Version ist auf 2.0.0 gesetzt (`cargo set-version` + `cargo xtask sync-version`),
-aber noch nicht deployed. Live läuft weiterhin v1.2.0.
+Release v2.0.0 ist veröffentlicht, das Image liegt auf GHCR
+(`ghcr.io/suppenterrine/kern-server:v2.0.0` und `:latest`, Digest
+`sha256:5dffa5a6…`). **`kern.lukasbaumert.de` läuft aber noch v1.2.0** — der
+Release-Workflow pusht das Image, deployt es aber nicht.
 
-**Breaking Changes für Consumer:**
-
-- Standardsprache der API von Deutsch auf **Englisch** gewechselt — bestehende
-  Aufrufe ohne `lang` bekommen jetzt englische Inhalte
-- `/` liefert nur noch einen schlanken Service-Deskriptor; die vollständige
-  Übersicht liegt auf `/help`
-- Fehlerantworten haben ein zusätzliches `code`-Feld (additiv, nicht brechend)
-
-**Das Gate läuft automatisch.** `release.yml` prüft vor jedem Upload Tests,
-Versions-Konsistenz, Fehlercodes und ob der Release-Tag zur Crate-Version passt.
-Schlägt es fehl, wird nichts veröffentlicht.
-
-Lokal vorab prüfbar:
+Auf dem Host:
 
 ```bash
-cargo test
-cargo xtask check
-cargo xtask check-tag v2.0.0
+docker pull ghcr.io/suppenterrine/kern-server:v2.0.0
+docker stop kern-server && docker rm kern-server
+docker run -d -p 3000:3000 --name kern-server ghcr.io/suppenterrine/kern-server:v2.0.0
 ```
 
-Zum Ausliefern: Release mit Tag `v2.0.0` und `[SERVER]` im Body anlegen — der
-Workflow baut die Binaries und pusht das Docker-Image nach GHCR. Danach
-`kern.lukasbaumert.de` auf das neue Image ziehen.
+Danach verifizieren:
+
+```bash
+curl https://kern.lukasbaumert.de/            # muss version 2.0.0 melden
+curl https://kern.lukasbaumert.de/lookup/7    # muss englisch antworten
+```
+
+**Consumer vorwarnen:** die Umstellung ist brechend. Aufrufe ohne `lang`
+bekommen ab dem Deploy englische statt deutscher Inhalte, und `/` liefert nicht
+mehr die Endpunkt-Übersicht (die liegt jetzt auf `/help`).
+
+### Deployment automatisieren
+
+Der letzte Schritt ist Handarbeit auf dem Host — genau die Stelle, an der laut
+[PRINCIPLES §4](PRINCIPLES.md) ein Werkzeug stehen sollte. Solange das so ist,
+kann Live und Release auseinanderlaufen, ohne dass es jemand merkt.
+
+Mindestens: ein Health-Check, der die live gemeldete Version gegen den neuesten
+Release-Tag prüft.
 
 ### Referenz-Dokumentation vervollständigen
 
