@@ -1,2 +1,11 @@
 [alias]
 xtask = "run -p xtask --"
+
+[build]
+# Build artifacts belong next to the project, so binaries are always found at
+# ./target/<profile>/. Relative to the workspace root.
+#
+# NOTE: a CARGO_TARGET_DIR environment variable overrides this setting — Cargo
+# ranks environment variables above config files. If builds land somewhere else,
+# check `echo $env:CARGO_TARGET_DIR` first.
+target-dir = "target"

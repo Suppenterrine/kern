@@ -1,0 +1,67 @@
+# English translation of bedeutungen.yaml (German base file).
+# Keep the numeric keys in sync with bedeutungen.yaml — every number defined
+# there must exist here as well (enforced by tests/bedeutungen_tests.rs).
+
+1:
+  bedeutung: "Origin, will, individuality, new beginnings"
+  lichtseite: "Pioneering spirit, leadership, courage to walk new paths, self-confidence, independence"
+  schattenseite: "Egotism, stubbornness, domineering behaviour, ruthlessness, isolation through self-overestimation"
+
+2:
+  bedeutung: "Duality, relationship, harmony, sensitivity"
+  lichtseite: "Diplomacy, teamwork, empathy, peacemaking, intuitive perception"
+  schattenseite: "Indecisiveness, excessive dependency, avoidance of conflict, emotional instability"
+
+3:
+  bedeutung: "Expression, creativity, communication"
+  lichtseite: "Artistic talent, charisma, optimism, inspiring communication, joy of life"
+  schattenseite: "Superficiality, talkativeness, scatteredness, vanity, lack of perseverance"
+
+4:
+  bedeutung: "Stability, order, structure, security"
+  lichtseite: "Reliability, methodical approach, perseverance, practical solutions, trustworthiness"
+  schattenseite: "Rigidity, pedantry, fear of change, excessive control, narrow-mindedness"
+
+5:
+  bedeutung: "Freedom, change, adventure, sensuality"
+  lichtseite: "Flexibility, curiosity, open-mindedness, spontaneity, vitality, adaptability"
+  schattenseite: "Restlessness, irresponsibility, superficiality, inconstancy, tendency towards addiction"
+
+6:
+  bedeutung: "Responsibility, love, care, balance"
+  lichtseite: "Selfless devotion, healing abilities, sense of family, need for harmony, protective instinct"
+  schattenseite: "Self-sacrifice, compulsion to control, martyrdom, overprotective behaviour, co-dependency"
+
+7:
+  bedeutung: "Depth, intuition, analysis, withdrawal"
+  lichtseite: "Spiritual insight, analytical thinking, wisdom, mystical abilities, self-reflection"
+  schattenseite: "Isolation, mistrust, over-analysis, detachment from reality, melancholic tendencies"
+
+8:
+  bedeutung: "Power, success, matter, karma"
+  lichtseite: "Leadership, material success, organisational talent, assertiveness, sense of justice"
+  schattenseite: "Abuse of power, materialism, mercilessness, workaholism, emotional coldness"
+
+9:
+  bedeutung: "Completion, wisdom, service, letting go"
+  lichtseite: "Humanitarian service, universal love, wisdom, tolerance, selfless devotion"
+  schattenseite: "World-weariness, exaggerated idealism, detachment from reality, emotional overwhelm, bitterness"
+
+11:
+  bedeutung: "Spiritual channel. Intuition & inspiration. The gate between the worlds."
+  lichtseite: "High sensitivity as a gift, visionary abilities, spiritual guidance, inspiration for others, mediumistic talent"
+  schattenseite: "Nervousness, escapism, psychic confusion, extreme perfectionism, mental fragility"
+
+22:
+  bedeutung: "Master architect. Great visions embodied in form. Manifested clarity."
+  lichtseite: "Realising large projects, visionary builder energy, practical spirituality, leading by example"
+  schattenseite: "Megalomania, overload from excessive standards, impatience with 'small' tasks, nervous breakdown"
+
+33:
+  bedeutung: "Master of unconditional love. Presence through compassion. Sacred service without loss of self."
+  lichtseite: "Universal healing power, unconditional love, spiritual teacher qualities, transformative presence"
+  schattenseite: "Emotional exhaustion, self-denial, overwhelming empathy, burnout from endless giving"
+
+
+rtap_1: 'PROMPT: Extract implicit & explicit statements Give me every statement contained in the following prose, whether stated explicitly or implicitly. Convert each statement into a binary answerable form, so that it could be answered unambiguously with Yes/No or True/False. Rules: 1. Extract every statement, even where it follows only indirectly or implicitly from the text. 2. Phrase each statement so that it is a clear, verifiable claim. 3. No open questions, no vague interpretations — only precise, binary statements. 4. Each statement as its own bullet point. Output format: list of all statements in binary phrasing. Input text:'
+rtap_2: 'PROMPT: The Four Questions Repeat the statement and examine it with the following questions: 1. Is it true? (Answer Yes or No.) 2. Can you know with absolute certainty that it is true? (Answer Yes or No.) 3. How do you react, what happens inside you or around you, when you believe that thought? 4. Who or what would you be without that thought? Additional instruction: Then formulate the turnarounds of the statement (e.g. "me to myself", "me to the other person", "the opposite", etc.) and examine inwardly how each turnaround could be true or truer.'

@@ -2,24 +2,62 @@ openapi: 3.0.0
 
 info:
   title: KERN API
-  version: 1.0.0
+  # NOTE: bump via `cargo set-version`, never by hand.
+  version: 2.0.0
   description: |
     The KERN API provides numerology analysis and helper endpoints
     for working with text, numbers, dates, and symbolic structures.
     It also includes endpoints designed for LLM prompt generation.
 
+    Localization. Coverage differs per resource:
+      - meanings (`/lookup`, `/lookup/{number}`, `/date`): `en` (default), `de`, `fr`
+      - prompts (`/spektra`, `/rtap`): `en` (default), `de`
+
+    There are no silent fallbacks. A language that is unknown, or known but
+    unavailable for the requested resource, is rejected with HTTP 400 — the API
+    never answers in a language other than the one asked for. Requesting
+    `/spektra?lang=fr` therefore fails with `language_not_available` rather than
+    returning English text. Every response names the language it used in `lang`.
+
+    Calculations and cipher names are not translated.
+
+    Errors are always English — `lang` selects the language of the content, not
+    of the protocol. Every error carries a stable `code`; branch on that rather
+    than on the human-readable `error` text.
+
+    Breaking changes in 2.0.0:
+      - the default language changed from German to English; pass `lang=de` for
+        the previous behaviour
+      - `/` now returns a compact service descriptor; the full endpoint listing
+        moved to `/help`
+
 servers:
-  - url: https://kern.drehraum.wtf
+  - url: https://kern.lukasbaumert.de
 
 paths:
 
   /:
     get:
-      summary: API root
-      description: API overview and basic information.
+      summary: Service descriptor
+      description: |
+        Compact identity probe: name, version, supported languages and a pointer
+        to the documentation. Intended for health checks. The full endpoint
+        listing lives at `/help`.
       responses:
         '200':
-          description: Root response
+          description: Service descriptor
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceInfo'
+
+  /help:
+    get:
+      summary: API overview
+      description: Full endpoint listing with usage examples.
+      responses:
+        '200':
+          description: Endpoint listing
           content:
             application/json:
               schema:
@@ -82,13 +120,20 @@ paths:
           schema:
             type: string
           description: Level of detail to return.
+        - $ref: '#/components/parameters/Lang'
       responses:
         '200':
           description: Lookup results
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ResultsResponse'
+                $ref: '#/components/schemas/LookupListResponse'
+        '400':
+          description: Unsupported language code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /lookup/{number}:
     get:
@@ -104,6 +149,7 @@ paths:
           in: query
           schema:
             type: string
+        - $ref: '#/components/parameters/Lang'
       responses:
         '200':
           description: Lookup result
@@ -111,6 +157,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LookupResponse'
+        '400':
+          description: Unsupported language code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /date:
     get:
@@ -127,6 +179,7 @@ paths:
           in: query
           schema:
             type: boolean
+        - $ref: '#/components/parameters/Lang'
       responses:
         '200':
           description: Date analysis result
@@ -134,17 +187,29 @@ paths:
             application/json:
               schema:
                 type: object
+        '400':
+          description: Unsupported language code or invalid range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /spektra:
     get:
       summary: Spectral analysis
-      description: Multi-cipher spectral analysis for LLM prompt generation.
+      description: |
+        Multi-cipher spectral analysis for LLM prompt generation.
+
+        The prompt exists in English and German only. Any other language — `fr`
+        included — is rejected with `language_not_available`; it is never
+        substituted.
       parameters:
         - name: word
           in: query
           required: true
           schema:
             type: string
+        - $ref: '#/components/parameters/PromptLang'
       responses:
         '200':
           description: Spectral analysis result
@@ -152,6 +217,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SpectrumResponse'
+        '400':
+          description: Missing word or unsupported language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /phase:
     get:
@@ -179,13 +250,19 @@ paths:
   /rtap:
     get:
       summary: RTAP prompts
-      description: Returns RTAP (Rethinking Thoughts And Positions) prompts.
+      description: |
+        Returns RTAP (Rethinking Thoughts And Positions) prompts.
+
+        The prompts exist in English and German only. Any other language — `fr`
+        included — is rejected with `language_not_available`; it is never
+        substituted.
       parameters:
         - name: part
           in: query
           schema:
             type: string
           description: Prompt part (single index or "both").
+        - $ref: '#/components/parameters/PromptLang'
       responses:
         '200':
           description: RTAP prompts
@@ -193,8 +270,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PromptsResponse'
+        '400':
+          description: Invalid part or unsupported language
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
 components:
+  parameters:
+
+    Lang:
+      name: lang
+      in: query
+      required: false
+      description: |
+        Language of the returned meanings. Defaults to `en` when omitted.
+        Region subtags are accepted and ignored (`en-US` resolves to `en`).
+        An unsupported code returns HTTP 400 with code `unsupported_language`.
+      schema:
+        type: string
+        enum: [de, en, fr]
+        default: en
+
+    PromptLang:
+      name: lang
+      in: query
+      required: false
+      description: |
+        Language of the returned prompt. Defaults to `en`. Prompts exist in
+        English and German only. `fr` is a valid language elsewhere in this API
+        but has no prompt, so it is rejected here with HTTP 400 and code
+        `language_not_available` — never silently answered in English.
+      schema:
+        type: string
+        enum: [de, en]
+        default: en
+
   schemas:
 
     ResultsResponse:
@@ -205,13 +317,94 @@ components:
           items:
             type: object
 
+    ServiceInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: KERN API
+        version:
+          type: string
+        languages:
+          type: array
+          items:
+            type: string
+            enum: [de, en, fr]
+        default_language:
+          type: string
+          example: en
+        documentation:
+          type: string
+          example: /help
+
+    ErrorResponse:
+      type: object
+      required: [code, error]
+      properties:
+        code:
+          type: string
+          description: |
+            Stable machine-readable identifier. Branch on this; `error` is prose
+            and may be reworded without notice.
+          enum:
+            - input_missing
+            - no_valid_inputs
+            - no_valid_ciphers
+            - unknown_cipher
+            - unsupported_language
+            - language_not_available
+            - invalid_range
+            - word_missing
+            - insufficient_inputs
+            - invalid_rtap_part
+            - rtap_prompt_missing
+            - spektra_failed
+          example: unsupported_language
+        error:
+          type: string
+          description: Human-readable message. Always English.
+          example: "unsupported language 'es'. supported: de, en, fr"
+
     LookupResponse:
       type: object
       properties:
         number:
           type: integer
+        lang:
+          type: string
+          enum: [de, en, fr]
+          description: Language the meanings in this response are written in.
         meaning:
-          type: object
+          type: string
+        positive:
+          type: string
+          description: Present only when requested via `parts`.
+        negative:
+          type: string
+          description: Present only when requested via `parts`.
+
+    LookupListResponse:
+      type: object
+      properties:
+        lang:
+          type: string
+          enum: [de, en, fr]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/LookupItem'
+
+    LookupItem:
+      type: object
+      properties:
+        number:
+          type: integer
+        meaning:
+          type: string
+        positive:
+          type: string
+        negative:
+          type: string
 
     SpectrumResponse:
       type: object

@@ -1,8 +1,9 @@
 use chrono::{Duration, Local};
 use clap::{Arg, ArgAction, Command};
 use kern::core::{
-    Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step, StepMetadata,
-    default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen, parse_range,
+    Cipher, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline, Step, StepMetadata,
+    default_cipher, descriptors, generate_matrix_pairs, get_cipher, load_bedeutungen_lang,
+    parse_range,
 };
 use kern::ui;
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,16 @@ struct ReduceResponse {
     total_chain: Option<Vec<String>>,
 }
 
+/// One entry of a Lookup step's payload: the reduced value plus the inputs that
+/// produced it. The Lookup `KernResult` itself carries no value (`value` is 0)
+/// — the actual data lives in its JSON payload, so it must always be read from
+/// here rather than from `KernResult::value`.
+#[derive(Deserialize)]
+struct LookupEntry {
+    value: u32,
+    sources: Vec<String>,
+}
+
 /// Lookup response for a single number
 #[derive(Serialize)]
 struct LookupResponse {
@@ -84,6 +95,7 @@ struct LookupResponse {
 /// Lookup mode response (multiple numbers)
 #[derive(Serialize)]
 struct LookupListResponse {
+    lang: &'static str,
     items: Vec<LookupResponse>,
 }
 
@@ -101,6 +113,7 @@ struct DateItem {
 /// Date mode response
 #[derive(Serialize)]
 struct DateResponse {
+    lang: &'static str,
     dates: Vec<DateItem>,
 }
 
@@ -203,6 +216,16 @@ fn main() {
                 .help("Shows complete meaning including positive and negative aspects"),
         )
         .arg(
+            Arg::new("lang")
+                .long("lang")
+                .value_name("CODE")
+                .num_args(1)
+                .help(
+                    "Language of the meanings: de (default), en, fr. \
+                     Affects lookup and date output only; calculations are language independent",
+                ),
+        )
+        .arg(
             Arg::new("cipher")
                 .long("cipher")
                 .value_name("CIPHER")
@@ -290,6 +313,16 @@ fn main() {
     let show_spektra = matches.get_flag("spektra");
     let show_pmr = matches.get_flag("phase-relation-matrix");
     let show_index = matches.get_flag("index");
+
+    // Meanings language. An unknown code aborts instead of silently falling
+    // back, mirroring the server's 400 response.
+    let lang = match matches.get_one::<String>("lang") {
+        Some(raw) => match raw.parse::<Lang>() {
+            Ok(lang) => lang,
+            Err(msg) => output_error(&msg, is_tty),
+        },
+        None => Lang::default(),
+    };
 
     // --index: dedicated alphabet-position lookup, independent of any cipher
     if show_index {
@@ -431,8 +464,15 @@ fn main() {
                         .map(|row| row.first().copied().flatten())
                         .collect();
 
-                    let bedeutungen = load_bedeutungen();
-                    output_date_json(&offsets, &formatted_dates, &flat_results, &bedeutungen, debug);
+                    let bedeutungen = load_bedeutungen_lang(lang);
+                    output_date_json(
+                        &offsets,
+                        &formatted_dates,
+                        &flat_results,
+                        &bedeutungen,
+                        lang,
+                        debug,
+                    );
                     return;
                 }
 
@@ -482,12 +522,6 @@ fn main() {
 
                 // Handle lookup if requested
                 if show_lookup {
-                    #[derive(Deserialize)]
-                    struct LookupEntry {
-                        value: u32,
-                        sources: Vec<String>,
-                    }
-
                     let lookup_results: Vec<&KernResult> = result_set
                         .iter()
                         .filter(|r| matches!(r.step.operation, Operation::Lookup))
@@ -498,7 +532,7 @@ fn main() {
                     match payload {
                         Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
                             Ok(entries) if !entries.is_empty() => {
-                                let bedeutungen = load_bedeutungen();
+                                let bedeutungen = load_bedeutungen_lang(lang);
 
                                 ui::spacing(ui::SPACING_MODE);
 
@@ -579,11 +613,26 @@ fn main() {
                 .cloned()
                 .collect();
 
-            // Load meanings
-            let bedeutungen = load_bedeutungen();
+            // The SPEKTRA prompt exists in German and English only. No silent
+            // substitution — an unavailable language aborts.
+            if !lang.has_prompts() {
+                output_error(
+                    &format!(
+                        "SPEKTRA prompt is not available in '{lang}'. available: {}",
+                        Lang::prompt_langs()
+                    ),
+                    is_tty,
+                );
+            }
+            let bedeutungen = load_bedeutungen_lang(lang);
 
             // Build spektra prompt
-            match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &bedeutungen) {
+            match kern::core::spektra::build_spektra_prompt(
+                word,
+                &reduce_results,
+                &bedeutungen,
+                lang,
+            ) {
                 Ok(prompt) => {
                     if is_tty {
                         ui::output::format_spektra_output(&prompt, is_tty);
@@ -612,7 +661,17 @@ fn main() {
             }
         };
 
-        let prompts = kern::core::load_rtap_prompts();
+        // No silent substitution: a language without RTAP prompts aborts.
+        let prompts = match kern::core::load_rtap_prompts_lang(lang) {
+            Some(prompts) => prompts,
+            None => output_error(
+                &format!(
+                    "RTAP prompts are not available in '{lang}'. available: {}",
+                    Lang::prompt_langs()
+                ),
+                is_tty,
+            ),
+        };
 
         match kern::core::get_rtap_prompt(part_num, &prompts) {
             Some(prompt) => {
@@ -723,16 +782,17 @@ fn main() {
                 // Lookup mode: only output lookup results
                 let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
                 if let Some(data) = payload {
-                    #[derive(Deserialize)]
-                    struct LookupEntry {
-                        value: u32,
-                        sources: Vec<String>,
-                    }
                     if let Ok(entries) = serde_json::from_str::<Vec<LookupEntry>>(data) {
                         if !entries.is_empty() {
-                            let bedeutungen = load_bedeutungen();
-                            let lookup_refs: Vec<&KernResult> = lookup_results.iter().copied().collect();
-                            output_lookup_json(&lookup_refs, &bedeutungen, show_pos, show_neg, show_full);
+                            let bedeutungen = load_bedeutungen_lang(lang);
+                            output_lookup_json(
+                                &entries,
+                                &bedeutungen,
+                                lang,
+                                show_pos,
+                                show_neg,
+                                show_full,
+                            );
                         }
                     }
                 }
@@ -831,18 +891,12 @@ fn main() {
         }
 
         if show_lookup {
-            #[derive(Deserialize)]
-            struct LookupEntry {
-                value: u32,
-                sources: Vec<String>,
-            }
-
             let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
 
             match payload {
                 Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
                     Ok(entries) if !entries.is_empty() => {
-                        let bedeutungen = load_bedeutungen();
+                        let bedeutungen = load_bedeutungen_lang(lang);
 
                         ui::spacing(ui::SPACING_MODE);
 
@@ -961,6 +1015,7 @@ fn output_date_json(
     formatted_dates: &[chrono::NaiveDate],
     results: &[Option<&KernResult>],
     bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    lang: Lang,
     debug: bool,
 ) {
     let mut dates = Vec::new();
@@ -971,7 +1026,7 @@ fn output_date_json(
             let meaning = bedeutungen
                 .get(&result.value)
                 .and_then(|b| b.text.as_deref())
-                .unwrap_or("- keine Bedeutung -")
+                .unwrap_or_else(|| lang.missing_meaning())
                 .to_string();
 
             dates.push(DateItem {
@@ -984,7 +1039,10 @@ fn output_date_json(
         }
     }
 
-    let response = DateResponse { dates };
+    let response = DateResponse {
+        lang: lang.code(),
+        dates,
+    };
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
     }
@@ -992,19 +1050,20 @@ fn output_date_json(
 
 /// Output lookup results as JSON
 fn output_lookup_json(
-    lookup_results: &[&KernResult],
+    lookup_entries: &[LookupEntry],
     bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
+    lang: Lang,
     show_pos: bool,
     show_neg: bool,
     show_full: bool,
 ) {
     let mut items = Vec::new();
 
-    for result in lookup_results {
+    for result in lookup_entries {
         let entry = bedeutungen.get(&result.value);
         let meaning = entry
             .and_then(|b| b.text.as_deref())
-            .unwrap_or("- keine Bedeutung -")
+            .unwrap_or_else(|| lang.missing_meaning())
             .to_string();
 
         let positive = if show_pos || show_full {
@@ -1027,7 +1086,10 @@ fn output_lookup_json(
         });
     }
 
-    let response = LookupListResponse { items };
+    let response = LookupListResponse {
+        lang: lang.code(),
+        items,
+    };
     if let Ok(json) = serde_json::to_string(&response) {
         println!("{}", json);
     }

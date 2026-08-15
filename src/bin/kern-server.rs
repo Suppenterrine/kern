@@ -6,9 +6,9 @@ use axum::{
 };
 use chrono::{Duration, Local};
 use kern::core::{
-    Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Operation, Pipeline, Step,
-    StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_bedeutungen, lookup,
-    parse_range, reduce_number_steps, reduce_number_verbose,
+    Bedeutung, Cipher, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline, Step,
+    StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_all_bedeutungen,
+    lookup_lang, parse_range, reduce_number_steps, reduce_number_verbose,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -18,11 +18,88 @@ const PKG_NAME: &str = env!("CARGO_PKG_NAME");
 
 #[derive(Clone)]
 struct AppState {
-    map: Arc<HashMap<u32, Bedeutung>>,
+    maps: Arc<HashMap<Lang, HashMap<u32, Bedeutung>>>,
+}
+
+impl AppState {
+    /// Meanings for `lang`. Every variant is loaded at startup, so the fallback
+    /// to the default language is unreachable in practice.
+    fn map(&self, lang: Lang) -> &HashMap<u32, Bedeutung> {
+        self.maps
+            .get(&lang)
+            .or_else(|| self.maps.get(&Lang::default()))
+            .expect("default language is always loaded")
+    }
+}
+
+/// Resolves the optional `lang` query parameter: missing or empty falls back to
+/// the default language, an unknown tag is rejected with 400. Rejecting is
+/// deliberate — silently answering a typo in the wrong language is worse than
+/// an explicit error.
+fn resolve_lang(raw: Option<&str>) -> Result<Lang, ApiError> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(Lang::default()),
+        Some(tag) => Lang::parse(tag).ok_or_else(|| {
+            bad_request(
+                "unsupported_language",
+                format!(
+                    "unsupported language '{tag}'. supported: {}",
+                    Lang::supported()
+                ),
+            )
+        }),
+    }
+}
+
+/// Resolves `lang` for the prompt endpoints. A language the API supports for
+/// content but that has no prompt (French) is **rejected** here, with its own
+/// code so clients can tell it apart from an unknown language. Answering in a
+/// different language than asked would be a wrong answer disguised as a
+/// successful one — see docs/PRINCIPLES.md.
+fn resolve_prompt_lang(raw: Option<&str>) -> Result<Lang, ApiError> {
+    let lang = resolve_lang(raw)?;
+    if !lang.has_prompts() {
+        return Err(bad_request(
+            "language_not_available",
+            format!(
+                "prompts are not available in '{}'. available: {}",
+                lang.code(),
+                Lang::prompt_langs()
+            ),
+        ));
+    }
+    Ok(lang)
 }
 
 // ============================================================================
-// Root Endpoint - API Overview
+// Root Endpoint - Service Descriptor
+// ============================================================================
+
+/// Deliberately small: `/` is what health checks and monitoring poll, so it
+/// stays a cheap identity probe. The full endpoint listing lives at `/help`.
+#[derive(Serialize)]
+struct ServiceInfo {
+    name: &'static str,
+    version: &'static str,
+    /// Language codes accepted by the `lang` parameter, in no particular order.
+    /// The default is named separately by `default_language`.
+    languages: Vec<&'static str>,
+    default_language: &'static str,
+    documentation: &'static str,
+}
+
+async fn root_handler() -> Json<ServiceInfo> {
+    Json(ServiceInfo {
+        name: "KERN API",
+        version: VERSION,
+        languages: Lang::ALL.iter().map(|l| l.code()).collect(),
+        default_language: Lang::default().code(),
+        documentation: "/help",
+    })
+}
+
+// ============================================================================
+// Help Endpoint - Full API Overview
 // ============================================================================
 
 #[derive(Serialize)]
@@ -36,11 +113,15 @@ struct EndpointInfo {
 struct ApiOverview {
     name: &'static str,
     version: &'static str,
+    /// Language codes accepted by the `lang` parameter, in no particular order.
+    /// The default is named separately by `default_language`.
+    languages: Vec<&'static str>,
+    default_language: &'static str,
     endpoints: Vec<EndpointInfo>,
     examples: HashMap<&'static str, &'static str>,
 }
 
-async fn root_handler() -> Json<ApiOverview> {
+async fn help_handler() -> Json<ApiOverview> {
     let mut examples = HashMap::new();
     examples.insert("reduce_simple", "/reduce?input=Wickfeld");
     examples.insert("reduce_debug", "/reduce?input=Wickfeld&debug=true");
@@ -58,15 +139,25 @@ async fn root_handler() -> Json<ApiOverview> {
     examples.insert("rtap_both", "/rtap?part=both");
     examples.insert("index_single", "/index?input=kassel");
     examples.insert("index_multi", "/index?input=Wickfeld,Love");
+    examples.insert("lookup_german", "/lookup/7?parts=full&lang=de");
+    examples.insert("lookup_french", "/lookup?numbers=1,7,11&parts=full&lang=fr");
+    examples.insert("date_german", "/date?range=0..7&lang=de");
 
     Json(ApiOverview {
         name: "KERN API",
         version: VERSION,
+        languages: Lang::ALL.iter().map(|l| l.code()).collect(),
+        default_language: Lang::default().code(),
         endpoints: vec![
             EndpointInfo {
                 path: "/",
                 method: "GET",
-                description: "API overview and documentation",
+                description: "Service descriptor: name, version, languages, link to this help",
+            },
+            EndpointInfo {
+                path: "/help",
+                method: "GET",
+                description: "This endpoint listing with examples",
             },
             EndpointInfo {
                 path: "/version",
@@ -81,17 +172,17 @@ async fn root_handler() -> Json<ApiOverview> {
             EndpointInfo {
                 path: "/lookup/:number",
                 method: "GET",
-                description: "Get meaning of a single number",
+                description: "Get meaning of a single number (supports lang=de|en|fr)",
             },
             EndpointInfo {
                 path: "/lookup",
                 method: "GET",
-                description: "Get meanings of multiple numbers",
+                description: "Get meanings of multiple numbers (supports lang=de|en|fr)",
             },
             EndpointInfo {
                 path: "/date",
                 method: "GET",
-                description: "Analyze date range with numerology",
+                description: "Analyze date range with numerology (supports lang=de|en|fr)",
             },
             EndpointInfo {
                 path: "/spektra",
@@ -184,26 +275,47 @@ struct ReduceResponse {
     total_chain: Option<Vec<String>>,
 }
 
+/// Error payload. `code` is a stable identifier meant for branching in client
+/// code; `error` is human-readable prose and may be reworded at any time, so
+/// clients must not match on it. Error messages are always English regardless
+/// of the `lang` parameter — `lang` selects the language of the *content*, not
+/// of the protocol.
 #[derive(Serialize)]
 struct ErrorResponse {
+    code: &'static str,
     error: String,
+}
+
+type ApiError = (StatusCode, Json<ErrorResponse>);
+
+fn bad_request(code: &'static str, error: impl Into<String>) -> ApiError {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(ErrorResponse {
+            code,
+            error: error.into(),
+        }),
+    )
+}
+
+fn server_error(code: &'static str, error: impl Into<String>) -> ApiError {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            code,
+            error: error.into(),
+        }),
+    )
 }
 
 async fn reduce_handler(
     Query(params): Query<ReduceParams>,
-) -> Result<Json<ReduceResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ReduceResponse>, ApiError> {
     let input = params
         .input
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "input parameter missing".into(),
-                }),
-            )
-        })?;
+        .ok_or_else(|| bad_request("input_missing", "input parameter missing"))?;
 
     // Parse inputs (comma-separated)
     let inputs: Vec<&str> = input
@@ -213,12 +325,7 @@ async fn reduce_handler(
         .collect();
 
     if inputs.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "no valid inputs provided".into(),
-            }),
-        ));
+        return Err(bad_request("no_valid_inputs", "no valid inputs provided"));
     }
 
     // Parse cipher parameter
@@ -245,11 +352,9 @@ async fn reduce_handler(
 
     // Validate cipher codes if provided
     if use_multi_cipher && cipher_codes.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "cipher parameter provided but no valid cipher codes found".into(),
-            }),
+        return Err(bad_request(
+            "no_valid_ciphers",
+            "cipher parameter provided but no valid cipher codes found",
         ));
     }
 
@@ -261,11 +366,9 @@ async fn reduce_handler(
             match all_descriptors.iter().find(|d| d.short.to_lowercase() == *code) {
                 Some(descriptor) => result.push((descriptor.factory)()),
                 None => {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Json(ErrorResponse {
-                            error: format!("unknown cipher code: {}", code),
-                        }),
+                    return Err(bad_request(
+                        "unknown_cipher",
+                        format!("unknown cipher code: {code}"),
                     ));
                 }
             }
@@ -391,6 +494,7 @@ fn reduce_number_steps_with_cipher(s: &str, cipher: &dyn Cipher) -> (u32, Vec<St
 #[derive(Serialize)]
 struct LookupResponse {
     number: u32,
+    lang: &'static str,
     meaning: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     positive: Option<String>,
@@ -401,15 +505,19 @@ struct LookupResponse {
 #[derive(Deserialize)]
 struct LookupPartsParam {
     parts: Option<String>, // "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
+    lang: Option<String>,  // "de" (default), "en", "fr"
 }
 
 async fn lookup_handler(
     Path(number): Path<u32>,
     Query(param): Query<LookupPartsParam>,
     State(state): State<AppState>,
-) -> Json<LookupResponse> {
-    let meaning = lookup(number, &state.map).to_string();
-    let entry = state.map.get(&number);
+) -> Result<Json<LookupResponse>, ApiError> {
+    let lang = resolve_lang(param.lang.as_deref())?;
+    let map = state.map(lang);
+
+    let meaning = lookup_lang(number, map, lang).to_string();
+    let entry = map.get(&number);
     let sel = param.parts.as_deref();
 
     // Support both new ("pos"/"neg"/"full") and legacy ("light"/"shadow") parameter names
@@ -426,18 +534,20 @@ async fn lookup_handler(
     } else {
         None
     };
-    Json(LookupResponse {
+    Ok(Json(LookupResponse {
         number,
+        lang: lang.code(),
         meaning,
         positive,
         negative,
-    })
+    }))
 }
 
 #[derive(Deserialize)]
 struct LookupParams {
     numbers: Option<String>, // optional: if omitted, returns all meanings
     parts: Option<String>,   // optional: "pos", "neg", "both", "full" (also supports legacy: "light", "shadow")
+    lang: Option<String>,    // optional: "de" (default), "en", "fr"
 }
 
 #[derive(Serialize)]
@@ -452,13 +562,17 @@ struct LookupItem {
 
 #[derive(Serialize)]
 struct LookupListResponse {
+    lang: &'static str,
     items: Vec<LookupItem>,
 }
 
 async fn lookup_multi_handler(
     Query(params): Query<LookupParams>,
     State(state): State<AppState>,
-) -> Json<LookupListResponse> {
+) -> Result<Json<LookupListResponse>, ApiError> {
+    let lang = resolve_lang(params.lang.as_deref())?;
+    let map = state.map(lang);
+
     let mut items = Vec::new();
     let sel = params.parts.as_deref();
 
@@ -468,11 +582,11 @@ async fn lookup_multi_handler(
 
     // If no numbers parameter provided, return all meanings (base description only)
     if params.numbers.is_none() || params.numbers.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-        let mut all_numbers: Vec<u32> = state.map.keys().copied().collect();
+        let mut all_numbers: Vec<u32> = map.keys().copied().collect();
         all_numbers.sort();
 
         for n in all_numbers {
-            let meaning = lookup(n, &state.map).to_string();
+            let meaning = lookup_lang(n, map, lang).to_string();
             items.push(LookupItem {
                 number: n,
                 meaning,
@@ -488,8 +602,8 @@ async fn lookup_multi_handler(
                 continue;
             }
             if let Ok(n) = s.parse::<u32>() {
-                let meaning = lookup(n, &state.map).to_string();
-                let entry = state.map.get(&n);
+                let meaning = lookup_lang(n, map, lang).to_string();
+                let entry = map.get(&n);
                 let positive = if want_positive {
                     entry.and_then(|b| b.licht.clone())
                 } else {
@@ -509,7 +623,10 @@ async fn lookup_multi_handler(
             }
         }
     }
-    Json(LookupListResponse { items })
+    Ok(Json(LookupListResponse {
+        lang: lang.code(),
+        items,
+    }))
 }
 
 // ============================================================================
@@ -540,19 +657,12 @@ struct IndexListResponse {
 
 async fn index_handler(
     Query(params): Query<IndexParams>,
-) -> Result<Json<IndexListResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<IndexListResponse>, ApiError> {
     let input = params
         .input
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "input parameter missing".into(),
-                }),
-            )
-        })?;
+        .ok_or_else(|| bad_request("input_missing", "input parameter missing"))?;
 
     let mut items = Vec::new();
     for word in input.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
@@ -581,6 +691,7 @@ struct DateParams {
     range: String,
     #[serde(default)]
     debug: bool,
+    lang: Option<String>, // optional: "de" (default), "en", "fr"
 }
 
 #[derive(Serialize)]
@@ -595,15 +706,18 @@ struct DateItem {
 
 #[derive(Serialize)]
 struct DateResponse {
+    lang: &'static str,
     dates: Vec<DateItem>,
 }
 
 async fn date_handler(
     Query(params): Query<DateParams>,
     State(state): State<AppState>,
-) -> Result<Json<DateResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let offsets = parse_range(&params.range)
-        .map_err(|e| (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })))?;
+) -> Result<Json<DateResponse>, ApiError> {
+    let lang = resolve_lang(params.lang.as_deref())?;
+    let map = state.map(lang);
+
+    let offsets = parse_range(&params.range).map_err(|e| bad_request("invalid_range", e))?;
     let today = Local::now().date_naive();
     let mut dates = Vec::new();
     for off in offsets {
@@ -611,7 +725,7 @@ async fn date_handler(
         let date_str = date.format("%d.%m.%Y").to_string();
         let raw = date.format("%d%m%Y").to_string();
         let (num, chain) = reduce_number_steps(&raw);
-        let meaning = lookup(num, &state.map).to_string();
+        let meaning = lookup_lang(num, map, lang).to_string();
         dates.push(DateItem {
             offset: off,
             date: date_str,
@@ -620,7 +734,10 @@ async fn date_handler(
             chain: if params.debug { Some(chain) } else { None },
         });
     }
-    Ok(Json(DateResponse { dates }))
+    Ok(Json(DateResponse {
+        lang: lang.code(),
+        dates,
+    }))
 }
 
 // ============================================================================
@@ -630,29 +747,28 @@ async fn date_handler(
 #[derive(Deserialize)]
 struct SpektraParams {
     word: Option<String>,
+    lang: Option<String>, // "en" (default) or "de"; fr falls back to en
 }
 
 #[derive(Serialize)]
 struct SpektraResponse {
+    lang: &'static str,
     prompt: String,
 }
 
 async fn spektra_handler(
     Query(params): Query<SpektraParams>,
     State(state): State<AppState>,
-) -> Result<Json<SpektraResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<SpektraResponse>, ApiError> {
     let word = params
         .word
         .as_ref()
         .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: "word parameter missing".into(),
-                }),
-            )
-        })?;
+        .ok_or_else(|| bad_request("word_missing", "word parameter missing"))?;
+
+    // The prompt exists in German and English only; anything else is rejected.
+    // The meanings woven in must match the prompt language.
+    let prompt_lang = resolve_prompt_lang(params.lang.as_deref())?;
 
     // Force all ciphers for spektra
     let mut spektra_ciphers: Vec<Box<dyn Cipher>> = Vec::new();
@@ -690,14 +806,19 @@ async fn spektra_handler(
         .cloned()
         .collect();
 
-    // Build spektra prompt
-    match kern::core::spektra::build_spektra_prompt(word, &reduce_results, &state.map) {
-        Ok(prompt) => Ok(Json(SpektraResponse { prompt })),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                error: format!("Error building spektra prompt: {}", e),
-            }),
+    match kern::core::spektra::build_spektra_prompt(
+        word,
+        &reduce_results,
+        state.map(prompt_lang),
+        prompt_lang,
+    ) {
+        Ok(prompt) => Ok(Json(SpektraResponse {
+            lang: prompt_lang.code(),
+            prompt,
+        })),
+        Err(e) => Err(server_error(
+            "spektra_failed",
+            format!("error building spektra prompt: {e}"),
         )),
     }
 }
@@ -736,22 +857,25 @@ struct PhaseResponse {
 #[derive(Deserialize)]
 struct RtapParams {
     part: Option<String>, // "1", "2", or "both"
+    lang: Option<String>, // "en" (default) or "de"; fr falls back to en
 }
 
 #[derive(Serialize)]
 struct RtapResponse {
+    lang: &'static str,
     prompt: String,
     part: u8,
 }
 
 #[derive(Serialize)]
 struct RtapBothResponse {
+    lang: &'static str,
     prompts: Vec<RtapResponse>,
 }
 
 async fn phase_handler(
     Query(params): Query<PhaseParams>,
-) -> Result<Json<PhaseResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<PhaseResponse>, ApiError> {
     // Parse inputs
     let inputs: Vec<String> = params
         .inputs
@@ -761,11 +885,9 @@ async fn phase_handler(
         .collect();
 
     if inputs.len() < 2 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "Phase relation matrix requires at least 2 inputs".into(),
-            }),
+        return Err(bad_request(
+            "insufficient_inputs",
+            "phase relation matrix requires at least 2 inputs",
         ));
     }
 
@@ -797,11 +919,9 @@ async fn phase_handler(
         match all_descriptors.iter().find(|d| d.short.to_lowercase() == *code || d.name.to_lowercase() == *code) {
             Some(descriptor) => ciphers.push((descriptor.factory)()),
             None => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorResponse {
-                        error: format!("Unknown cipher code: {}", code),
-                    }),
+                return Err(bad_request(
+                    "unknown_cipher",
+                    format!("unknown cipher code: {code}"),
                 ));
             }
         }
@@ -857,8 +977,11 @@ async fn phase_handler(
 
 async fn rtap_handler(
     Query(params): Query<RtapParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    let prompts = kern::core::load_rtap_prompts();
+) -> Result<Json<serde_json::Value>, ApiError> {
+    // RTAP prompts exist in German and English only; anything else is rejected.
+    let prompt_lang = resolve_prompt_lang(params.lang.as_deref())?;
+    let prompts = kern::core::load_rtap_prompts_lang(prompt_lang)
+        .expect("resolve_prompt_lang guarantees prompts exist");
 
     let part_str = params.part.as_deref().unwrap_or("1");
 
@@ -869,55 +992,52 @@ async fn rtap_handler(
             match kern::core::get_rtap_prompt(part_num, &prompts) {
                 Some(prompt) => {
                     results.push(RtapResponse {
+                        lang: prompt_lang.code(),
                         prompt: prompt.to_string(),
                         part: part_num,
                     });
                 }
                 None => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse {
-                            error: format!("RTAP prompt {} not found", part_num),
-                        }),
+                    return Err(server_error(
+                        "rtap_prompt_missing",
+                        format!("RTAP prompt {part_num} not found"),
                     ));
                 }
             }
         }
 
-        let response = RtapBothResponse { prompts: results };
+        let response = RtapBothResponse {
+            lang: prompt_lang.code(),
+            prompts: results,
+        };
         Ok(Json(serde_json::to_value(response).unwrap()))
     } else {
         let part_num = part_str.parse::<u8>().map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Invalid part number: {}. Must be 1, 2, or 'both'", part_str),
-                }),
+            bad_request(
+                "invalid_rtap_part",
+                format!("invalid part number: {part_str}. must be 1, 2, or 'both'"),
             )
         })?;
 
         if part_num != 1 && part_num != 2 {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ErrorResponse {
-                    error: format!("Invalid part number: {}. Must be 1 or 2", part_num),
-                }),
+            return Err(bad_request(
+                "invalid_rtap_part",
+                format!("invalid part number: {part_num}. must be 1 or 2"),
             ));
         }
 
         match kern::core::get_rtap_prompt(part_num, &prompts) {
             Some(prompt) => {
                 let response = RtapResponse {
+                    lang: prompt_lang.code(),
                     prompt: prompt.to_string(),
                     part: part_num,
                 };
                 Ok(Json(serde_json::to_value(response).unwrap()))
             }
-            None => Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    error: format!("RTAP prompt {} not found in configuration", part_num),
-                }),
+            None => Err(server_error(
+                "rtap_prompt_missing",
+                format!("RTAP prompt {part_num} not found in configuration"),
             )),
         }
     }
@@ -929,11 +1049,13 @@ async fn rtap_handler(
 
 #[tokio::main]
 async fn main() {
-    let map = load_bedeutungen();
-    let state = AppState { map: Arc::new(map) };
+    let state = AppState {
+        maps: Arc::new(load_all_bedeutungen()),
+    };
 
     let app = Router::new()
         .route("/", get(root_handler))
+        .route("/help", get(help_handler))
         .route("/version", get(version_handler))
         .route("/reduce", get(reduce_handler))
         .route("/lookup", get(lookup_multi_handler))
@@ -946,7 +1068,12 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("KERN Server v{} listening on http://{}", VERSION, addr);
+    println!(
+        "KERN Server v{} listening on http://{} (languages: {})",
+        VERSION,
+        addr,
+        Lang::supported()
+    );
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

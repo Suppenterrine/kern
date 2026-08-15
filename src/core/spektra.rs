@@ -3,10 +3,68 @@
 //! Dieses Modul befüllt das statische spektra_prompt.txt Template
 //! mit Kern-berechneten Werten (11 Chiffren + Bedeutungen).
 
+use crate::core::Lang;
 use crate::core::KernResult;
 use crate::core::phase::{calculate_compartment, calculate_phase};
 use regex::Regex;
 use std::collections::HashMap;
+
+/// Language-specific tokens of the SPEKTRA template. The placeholder names are
+/// part of the template text, so they must be swapped together with it —
+/// otherwise the fill-in regex silently matches nothing and the prompt goes out
+/// with raw `[Number]` placeholders.
+struct SpektraLabels {
+    /// Placeholder for the analysed word
+    input: &'static str,
+    /// Label preceding the reduced value
+    reduction: &'static str,
+    /// Label preceding the meaning text
+    meaning: &'static str,
+    /// Placeholder token for the value
+    number_token: &'static str,
+    /// Placeholder token for the meaning
+    meaning_token: &'static str,
+    resonance_header: &'static str,
+    tension_header: &'static str,
+    none_found: &'static str,
+    both: &'static str,
+}
+
+const LABELS_DE: SpektraLabels = SpektraLabels {
+    input: "[User-Eingabe]",
+    reduction: "Reduktion",
+    meaning: "Bedeutung",
+    number_token: "[Zahl]",
+    meaning_token: "[Bedeutung]",
+    resonance_header: "RESONANZACHSEN",
+    tension_header: "SPANNUNGSACHSEN",
+    none_found: "Keine gefunden",
+    both: "beide",
+};
+
+const LABELS_EN: SpektraLabels = SpektraLabels {
+    input: "[User-Input]",
+    reduction: "Reduction",
+    meaning: "Meaning",
+    number_token: "[Number]",
+    meaning_token: "[Meaning]",
+    resonance_header: "RESONANCE AXES",
+    tension_header: "TENSION AXES",
+    none_found: "None found",
+    both: "both",
+};
+
+/// Template and its matching labels for `lang`, or `None` if SPEKTRA does not
+/// exist in that language. Returned as a pair so the two can never be mismatched
+/// at a call site, and matched exhaustively so a new language forces an explicit
+/// decision rather than inheriting a fallback.
+fn prompt_assets(lang: Lang) -> Option<(&'static str, &'static SpektraLabels)> {
+    match lang {
+        Lang::De => Some((include_str!("../../spektra_prompt.txt"), &LABELS_DE)),
+        Lang::En => Some((include_str!("../../spektra_prompt.en.txt"), &LABELS_EN)),
+        Lang::Fr => None,
+    }
+}
 
 /// Achsen-Typ für Spektra-Analyse
 #[derive(Debug, Clone)]
@@ -30,20 +88,26 @@ pub fn build_spektra_prompt(
     word: &str,
     results: &[KernResult],
     bedeutungen: &HashMap<u32, crate::core::Bedeutung>,
+    lang: Lang,
 ) -> Result<String, String> {
-    // Template als eingebetteter String
-    let template = include_str!("../../spektra_prompt.txt");
+    // Kein stiller Sprachwechsel: fehlt das Template, ist das ein Fehler.
+    let (template, labels) = prompt_assets(lang).ok_or_else(|| {
+        format!(
+            "SPEKTRA prompt is not available in '{lang}'. available: {}",
+            Lang::prompt_langs()
+        )
+    })?;
 
     // Sorge Ergebnisse nach Cipher-Name
     let mut cipher_results: HashMap<String, (u32, String)> = HashMap::new();
-    
+
     for result in results {
         let meaning = bedeutungen
             .get(&result.value)
             .and_then(|b| b.text.as_deref())
-            .unwrap_or("- keine Bedeutung -")
+            .unwrap_or_else(|| lang.missing_meaning())
             .to_string();
-        
+
         cipher_results.insert(result.cipher.clone(), (result.value, meaning));
     }
 
@@ -65,23 +129,27 @@ pub fn build_spektra_prompt(
 
     let mut result_template = template.to_string();
 
-    // Ersetze [User-Eingabe]
-    result_template = result_template.replace("[User-Eingabe]", word);
+    // Ersetze den Wort-Platzhalter
+    result_template = result_template.replace(labels.input, word);
 
-    // Ersetze [Zahl] und [Bedeutung] für jede Chiffre
+    // Ersetze Zahl- und Bedeutungs-Platzhalter für jede Chiffre
     // Verwende Regex für flexible Whitespace-Behandlung
     for (template_name, cipher_key) in &template_to_cipher {
         if let Some((value, meaning)) = cipher_results.get(*cipher_key) {
             // Pattern erlaubt variable Whitespace
             let pattern_str = format!(
-                r"{}:\s*\n\s*-\s*Reduktion:\s*\[Zahl\]\s*\n\s*-\s*Bedeutung:\s*\[Bedeutung\]",
-                regex::escape(template_name)
+                r"{}:\s*\n\s*-\s*{}:\s*{}\s*\n\s*-\s*{}:\s*{}",
+                regex::escape(template_name),
+                regex::escape(labels.reduction),
+                regex::escape(labels.number_token),
+                regex::escape(labels.meaning),
+                regex::escape(labels.meaning_token),
             );
 
             if let Ok(re) = Regex::new(&pattern_str) {
                 let replacement = format!(
-                    "{}:\n   - Reduktion: {}\n   - Bedeutung: {}",
-                    template_name, value, meaning
+                    "{}:\n   - {}: {}\n   - {}: {}",
+                    template_name, labels.reduction, value, labels.meaning, meaning
                 );
                 result_template = re.replace(&result_template, replacement).to_string();
             }
@@ -92,12 +160,14 @@ pub fn build_spektra_prompt(
     let (resonanz_axes, spannungs_axes) = calculate_spektra_axes(results);
 
     // Formatiere Achsen
-    let resonanz_text = format_resonanz_axes(&resonanz_axes);
-    let spannungs_text = format_spannungs_axes(&spannungs_axes);
+    let resonanz_text = format_resonanz_axes(&resonanz_axes, labels);
+    let spannungs_text = format_spannungs_axes(&spannungs_axes, labels);
 
     // Ersetze Achsen-Platzhalter im Template
-    result_template = result_template.replace("RESONANZACHSEN: ...", &resonanz_text);
-    result_template = result_template.replace("SPANNUNGSACHSEN: ...", &spannungs_text);
+    result_template =
+        result_template.replace(&format!("{}: ...", labels.resonance_header), &resonanz_text);
+    result_template =
+        result_template.replace(&format!("{}: ...", labels.tension_header), &spannungs_text);
 
     Ok(result_template)
 }
@@ -171,17 +241,18 @@ fn format_cipher_name(cipher: &str) -> &str {
 }
 
 /// Formatiert Resonanzachsen für die Template-Ausgabe
-fn format_resonanz_axes(axes: &[SpektraAxis]) -> String {
+fn format_resonanz_axes(axes: &[SpektraAxis], labels: &SpektraLabels) -> String {
     if axes.is_empty() {
-        return "RESONANZACHSEN: Keine gefunden".to_string();
+        return format!("{}: {}", labels.resonance_header, labels.none_found);
     }
 
-    let mut output = String::from("RESONANZACHSEN:");
+    let mut output = format!("{}:", labels.resonance_header);
     for axis in axes {
         output.push_str(&format!(
-            "\n  - {} ↔ {} (beide: {})",
+            "\n  - {} ↔ {} ({}: {})",
             format_cipher_name(&axis.cipher_a),
             format_cipher_name(&axis.cipher_b),
+            labels.both,
             axis.value_a
         ));
     }
@@ -189,12 +260,12 @@ fn format_resonanz_axes(axes: &[SpektraAxis]) -> String {
 }
 
 /// Formatiert Spannungsachsen für die Template-Ausgabe
-fn format_spannungs_axes(axes: &[SpektraAxis]) -> String {
+fn format_spannungs_axes(axes: &[SpektraAxis], labels: &SpektraLabels) -> String {
     if axes.is_empty() {
-        return "SPANNUNGSACHSEN: Keine gefunden".to_string();
+        return format!("{}: {}", labels.tension_header, labels.none_found);
     }
 
-    let mut output = String::from("SPANNUNGSACHSEN:");
+    let mut output = format!("{}:", labels.tension_header);
     for axis in axes {
         output.push_str(&format!(
             "\n  - {} ({}) ⟷ {} ({})",
@@ -210,6 +281,58 @@ fn format_spannungs_axes(axes: &[SpektraAxis]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The fill-in regex is built from the labels and applied to the template.
+    /// If the two ever drift apart, nothing errors — the prompt just ships with
+    /// raw placeholders. This asserts they stay in sync for every language.
+    #[test]
+    fn template_and_labels_match_for_every_language() {
+        for lang in Lang::PROMPT_LANGS {
+            let (tpl, lbl) = prompt_assets(lang).expect("prompt language must have assets");
+            let ctx = format!("lang '{lang}'");
+
+            for token in [lbl.input, lbl.number_token, lbl.meaning_token] {
+                assert!(tpl.contains(token), "{ctx}: template lacks token {token}");
+            }
+            for label in [lbl.reduction, lbl.meaning] {
+                assert!(
+                    tpl.contains(&format!("- {label}:")),
+                    "{ctx}: template lacks label '{label}'"
+                );
+            }
+            for header in [lbl.resonance_header, lbl.tension_header] {
+                assert!(
+                    tpl.contains(&format!("{header}: ...")),
+                    "{ctx}: template lacks axis placeholder '{header}: ...'"
+                );
+            }
+        }
+    }
+
+    /// A language without a SPEKTRA template must produce an error naming the
+    /// available languages — never a prompt in some other language.
+    #[test]
+    fn language_without_a_template_is_an_error_not_a_substitution() {
+        assert!(!Lang::Fr.has_prompts());
+        assert!(prompt_assets(Lang::Fr).is_none());
+
+        let err = build_spektra_prompt("Test", &[], &HashMap::new(), Lang::Fr)
+            .expect_err("French must not yield a prompt");
+        assert!(err.contains("fr"), "error should name the request: {err}");
+        assert!(err.contains("de"), "error should list alternatives: {err}");
+        assert!(err.contains("en"), "error should list alternatives: {err}");
+    }
+
+    /// Every language with prompts must actually build one.
+    #[test]
+    fn every_prompt_language_builds() {
+        for lang in Lang::PROMPT_LANGS {
+            assert!(
+                build_spektra_prompt("Test", &[], &HashMap::new(), lang).is_ok(),
+                "{lang} must build a prompt"
+            );
+        }
+    }
 
     #[test]
     fn test_template_loading() {
@@ -341,11 +464,15 @@ mod tests {
             axis_type: AxisType::Resonanz,
         }];
 
-        let output = format_resonanz_axes(&resonanz);
+        let output = format_resonanz_axes(&resonanz, prompt_assets(Lang::De).unwrap().1);
         assert!(output.contains("RESONANZACHSEN:"));
         assert!(output.contains("Ordinal"));
         assert!(output.contains("Pythagorean"));
         assert!(output.contains("(beide: 7)"));
+
+        let english = format_resonanz_axes(&resonanz, prompt_assets(Lang::En).unwrap().1);
+        assert!(english.contains("RESONANCE AXES:"));
+        assert!(english.contains("(both: 7)"));
     }
 
     #[test]
@@ -441,7 +568,7 @@ mod tests {
             },
         );
 
-        let output = build_spektra_prompt("TestWort", &results, &bedeutungen).unwrap();
+        let output = build_spektra_prompt("TestWort", &results, &bedeutungen, Lang::De).unwrap();
 
         // Prüfe, dass Achsen im Output enthalten sind
         assert!(output.contains("RESONANZACHSEN:"));
