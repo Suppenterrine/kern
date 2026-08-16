@@ -23,7 +23,7 @@ impl Cipher for PrimesCipher {
         }
 
         let c = ch.to_ascii_uppercase();
-        if ('A'..='Z').contains(&c) {
+        if c.is_ascii_uppercase() {
             let idx = (c as u8 - b'A') as usize;
             nth_primes()[idx]
         } else {

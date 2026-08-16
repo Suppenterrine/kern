@@ -13,7 +13,7 @@ impl Cipher for SeptenaryCipher {
             return ch.to_digit(10).unwrap_or(0);
         }
         let c = ch.to_ascii_uppercase();
-        if ('A'..='Z').contains(&c) {
+        if c.is_ascii_uppercase() {
             let pos = (c as u32) - ('A' as u32); // 0..25
             // map cyclically to 1..7
             (pos % 7) + 1

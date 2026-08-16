@@ -440,6 +440,248 @@ pub mod core {
         out
     }
 
+    /// Raw YAML source for a language. All files are embedded at compile time,
+    /// so the binary stays self-contained and no runtime lookup can fail.
+    fn bedeutungen_source(lang: Lang) -> &'static str {
+        match lang {
+            Lang::De => include_str!("../bedeutungen.yaml"),
+            Lang::En => include_str!("../bedeutungen.en.yaml"),
+            Lang::Fr => include_str!("../bedeutungen.fr.yaml"),
+        }
+    }
+
+    /// Loads the meanings for `lang`. The German file is the base and also
+    /// carries the language independent `rtap_*` prompts; non-numeric keys are
+    /// skipped here in every language.
+    pub fn load_bedeutungen_lang(lang: Lang) -> HashMap<u32, Bedeutung> {
+        let yaml_str = bedeutungen_source(lang);
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
+            .unwrap_or_else(|e| panic!("Failed to parse bedeutungen ({lang}): {e}"));
+
+        let mut bedeutungen = HashMap::new();
+
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (key, val) in map {
+                // Only parse entries with numeric keys
+                if let serde_yaml::Value::Number(num) = key
+                    && let Some(num_u64) = num.as_u64() {
+                        let num_u32 = num_u64 as u32;
+                        if let Ok(bedeutung) = serde_yaml::from_value::<Bedeutung>(val) {
+                            bedeutungen.insert(num_u32, bedeutung);
+                        }
+                    }
+            }
+        }
+
+        bedeutungen
+    }
+
+    /// Meanings in German, independent of [`Lang::default`]. This is for the
+    /// German-only surfaces (SPEKTRA prompt); anything driven by a request
+    /// parameter must use [`load_bedeutungen_lang`] instead.
+    pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
+        load_bedeutungen_lang(Lang::De)
+    }
+
+    /// All languages at once — used by the server, which keeps every language
+    /// resident in state instead of re-parsing YAML per request.
+    pub fn load_all_bedeutungen() -> HashMap<Lang, HashMap<u32, Bedeutung>> {
+        Lang::ALL
+            .into_iter()
+            .map(|lang| (lang, load_bedeutungen_lang(lang)))
+            .collect()
+    }
+
+    /// YAML source carrying the `rtap_*` prompts for `lang`, or `None` if the
+    /// prompts do not exist in that language. Matched exhaustively so a new
+    /// language forces an explicit decision instead of inheriting a fallback.
+    fn rtap_source(lang: Lang) -> Option<&'static str> {
+        match lang {
+            Lang::De => Some(include_str!("../bedeutungen.yaml")),
+            Lang::En => Some(include_str!("../bedeutungen.en.yaml")),
+            Lang::Fr => None,
+        }
+    }
+
+    /// Load RTAP prompts for `lang`, or `None` if they do not exist in that
+    /// language. Callers must surface that as an error rather than substituting
+    /// another language.
+    pub fn load_rtap_prompts_lang(lang: Lang) -> Option<HashMap<String, String>> {
+        let yaml_str = rtap_source(lang)?;
+        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
+            .unwrap_or_else(|e| panic!("Failed to parse RTAP prompts ({lang}): {e}"));
+
+        let mut prompts = HashMap::new();
+
+        if let serde_yaml::Value::Mapping(map) = value {
+            for (key, val) in map {
+                if let (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) = (key, val)
+                    && k.starts_with("rtap_") {
+                        prompts.insert(k, v);
+                    }
+            }
+        }
+
+        Some(prompts)
+    }
+
+    /// RTAP prompts in the default language, which always has them.
+    pub fn load_rtap_prompts() -> HashMap<String, String> {
+        load_rtap_prompts_lang(Lang::default())
+            .expect("the default language must have prompts")
+    }
+
+    /// Get RTAP prompt by part number (1 or 2)
+    pub fn get_rtap_prompt(part: u8, prompts: &HashMap<String, String>) -> Option<&str> {
+        let key = format!("rtap_{}", part);
+        prompts.get(&key).map(|s| s.as_str())
+    }
+
+    /// Meaning text for `zahl`, falling back to the localized placeholder.
+    /// `lang` must match the language `map` was loaded with — it only selects
+    /// the placeholder wording.
+    pub fn lookup_lang(zahl: u32, map: &HashMap<u32, Bedeutung>, lang: Lang) -> &str {
+        map.get(&zahl)
+            .and_then(|b| b.text.as_deref())
+            .unwrap_or_else(|| lang.missing_meaning())
+    }
+
+    /// German lookup, paired with [`load_bedeutungen`].
+    pub fn lookup(zahl: u32, map: &HashMap<u32, Bedeutung>) -> &str {
+        lookup_lang(zahl, map, Lang::De)
+    }
+
+    pub fn reduce_number_steps_with_cipher(input: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
+        if input == "11" || input == "22" || input == "33" {
+            let line = format!("{input} ist eine Masterzahl → {input}");
+            return (input.parse().unwrap(), vec![line]);
+        }
+
+        let values: Vec<u32> = input.chars().map(|ch| cipher.char_to_value(ch)).collect();
+        let mut num: u32 = values.iter().sum();
+
+        let mut lines = Vec::new();
+        lines.push(format!(
+            "{} = {}",
+            values
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<_>>()
+                .join("+"),
+            num
+        ));
+
+        while num > 9 && !matches!(num, 11 | 22 | 33) {
+            let digits: Vec<u32> = num
+                .to_string()
+                .chars()
+                .map(|c| c.to_digit(10).unwrap())
+                .collect();
+            let sum: u32 = digits.iter().sum();
+            lines.push(format!(
+                "{} = {}",
+                digits
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join("+"),
+                sum
+            ));
+            num = sum;
+        }
+
+        lines.push(format!("→ {num}"));
+        (num, lines)
+    }
+
+    pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {
+        let cipher = OrdinalCipher;
+        reduce_number_steps_with_cipher(input, &cipher)
+    }
+
+    pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
+        let step = Step::new(0, 0, Operation::Reduce);
+        let result = KernResult::from_input_default(input, debug, step);
+        if debug {
+            for line in &result.trace {
+                println!("{line}");
+            }
+        }
+        result.value
+    }
+
+    pub fn parse_range(spec: &str) -> std::result::Result<Vec<i32>, String> {
+        let today = Local::now().date_naive();
+
+        // A) Datums-Range: dd.mm.yyyy..dd.mm.yyyy
+        if let Some((start, end)) = spec.split_once("..")
+            && let (Ok(sd), Ok(ed)) = (
+                NaiveDate::parse_from_str(start, "%d.%m.%Y"),
+                NaiveDate::parse_from_str(end, "%d.%m.%Y"),
+            ) {
+                let s = (sd - today).num_days() as i32;
+                let e = (ed - today).num_days() as i32;
+                let mut v = Vec::new();
+                if s <= e {
+                    for i in s..=e {
+                        v.push(i);
+                    }
+                } else {
+                    for i in (e..=s).rev() {
+                        v.push(i);
+                    }
+                }
+                return Ok(v);
+            }
+
+        // B) Einzel-Datum
+        if let Ok(d) = NaiveDate::parse_from_str(spec, "%d.%m.%Y") {
+            let off = (d - today).num_days() as i32;
+            return Ok(vec![off]);
+        }
+
+        // A)  -5..4   oder   3..-2
+        if let Some((a, b)) = spec.split_once("..") {
+            let s: i32 = a.parse().map_err(|_| "invalid range start")?;
+            let e: i32 = b.parse().map_err(|_| "invalid range end")?;
+            let mut v = Vec::new();
+            if s <= e {
+                for i in s..=e {
+                    v.push(i);
+                }
+            } else {
+                for i in (e..=s).rev() {
+                    v.push(i);
+                }
+            }
+            return Ok(v);
+        }
+
+        // B) alte Syntax  0+3 / 0-3
+        let re = Regex::new(r"^([+-]?\d+)([+-])(\d+)$").unwrap();
+        if let Some(c) = re.captures(spec) {
+            let start: i32 = c[1].parse().unwrap();
+            let end_off: i32 = c[3].parse().unwrap();
+            let end = if &c[2] == "+" { end_off } else { -end_off };
+            let mut v = Vec::new();
+            if start <= end {
+                for i in start..=end {
+                    v.push(i);
+                }
+            } else {
+                for i in (end..=start).rev() {
+                    v.push(i);
+                }
+            }
+            return Ok(v);
+        }
+
+        // C) Einzelwert
+        spec.parse::<i32>()
+            .map(|v| vec![v])
+            .map_err(|_| "invalid range specification".into())
+    }
+
     #[cfg(test)]
     mod tests {
         use super::*;
@@ -588,250 +830,5 @@ pub mod core {
                 assert_eq!(lookup_lang(10, &map, lang), lang.missing_meaning());
             }
         }
-    }
-
-    /// Raw YAML source for a language. All files are embedded at compile time,
-    /// so the binary stays self-contained and no runtime lookup can fail.
-    fn bedeutungen_source(lang: Lang) -> &'static str {
-        match lang {
-            Lang::De => include_str!("../bedeutungen.yaml"),
-            Lang::En => include_str!("../bedeutungen.en.yaml"),
-            Lang::Fr => include_str!("../bedeutungen.fr.yaml"),
-        }
-    }
-
-    /// Loads the meanings for `lang`. The German file is the base and also
-    /// carries the language independent `rtap_*` prompts; non-numeric keys are
-    /// skipped here in every language.
-    pub fn load_bedeutungen_lang(lang: Lang) -> HashMap<u32, Bedeutung> {
-        let yaml_str = bedeutungen_source(lang);
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
-            .unwrap_or_else(|e| panic!("Failed to parse bedeutungen ({lang}): {e}"));
-
-        let mut bedeutungen = HashMap::new();
-
-        if let serde_yaml::Value::Mapping(map) = value {
-            for (key, val) in map {
-                // Only parse entries with numeric keys
-                if let serde_yaml::Value::Number(num) = key {
-                    if let Some(num_u64) = num.as_u64() {
-                        let num_u32 = num_u64 as u32;
-                        if let Ok(bedeutung) = serde_yaml::from_value::<Bedeutung>(val) {
-                            bedeutungen.insert(num_u32, bedeutung);
-                        }
-                    }
-                }
-            }
-        }
-
-        bedeutungen
-    }
-
-    /// Meanings in German, independent of [`Lang::default`]. This is for the
-    /// German-only surfaces (SPEKTRA prompt); anything driven by a request
-    /// parameter must use [`load_bedeutungen_lang`] instead.
-    pub fn load_bedeutungen() -> HashMap<u32, Bedeutung> {
-        load_bedeutungen_lang(Lang::De)
-    }
-
-    /// All languages at once — used by the server, which keeps every language
-    /// resident in state instead of re-parsing YAML per request.
-    pub fn load_all_bedeutungen() -> HashMap<Lang, HashMap<u32, Bedeutung>> {
-        Lang::ALL
-            .into_iter()
-            .map(|lang| (lang, load_bedeutungen_lang(lang)))
-            .collect()
-    }
-
-    /// YAML source carrying the `rtap_*` prompts for `lang`, or `None` if the
-    /// prompts do not exist in that language. Matched exhaustively so a new
-    /// language forces an explicit decision instead of inheriting a fallback.
-    fn rtap_source(lang: Lang) -> Option<&'static str> {
-        match lang {
-            Lang::De => Some(include_str!("../bedeutungen.yaml")),
-            Lang::En => Some(include_str!("../bedeutungen.en.yaml")),
-            Lang::Fr => None,
-        }
-    }
-
-    /// Load RTAP prompts for `lang`, or `None` if they do not exist in that
-    /// language. Callers must surface that as an error rather than substituting
-    /// another language.
-    pub fn load_rtap_prompts_lang(lang: Lang) -> Option<HashMap<String, String>> {
-        let yaml_str = rtap_source(lang)?;
-        let value: serde_yaml::Value = serde_yaml::from_str(yaml_str)
-            .unwrap_or_else(|e| panic!("Failed to parse RTAP prompts ({lang}): {e}"));
-
-        let mut prompts = HashMap::new();
-
-        if let serde_yaml::Value::Mapping(map) = value {
-            for (key, val) in map {
-                if let (serde_yaml::Value::String(k), serde_yaml::Value::String(v)) = (key, val) {
-                    if k.starts_with("rtap_") {
-                        prompts.insert(k, v);
-                    }
-                }
-            }
-        }
-
-        Some(prompts)
-    }
-
-    /// RTAP prompts in the default language, which always has them.
-    pub fn load_rtap_prompts() -> HashMap<String, String> {
-        load_rtap_prompts_lang(Lang::default())
-            .expect("the default language must have prompts")
-    }
-
-    /// Get RTAP prompt by part number (1 or 2)
-    pub fn get_rtap_prompt(part: u8, prompts: &HashMap<String, String>) -> Option<&str> {
-        let key = format!("rtap_{}", part);
-        prompts.get(&key).map(|s| s.as_str())
-    }
-
-    /// Meaning text for `zahl`, falling back to the localized placeholder.
-    /// `lang` must match the language `map` was loaded with — it only selects
-    /// the placeholder wording.
-    pub fn lookup_lang<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>, lang: Lang) -> &'a str {
-        map.get(&zahl)
-            .and_then(|b| b.text.as_deref())
-            .unwrap_or_else(|| lang.missing_meaning())
-    }
-
-    /// German lookup, paired with [`load_bedeutungen`].
-    pub fn lookup<'a>(zahl: u32, map: &'a HashMap<u32, Bedeutung>) -> &'a str {
-        lookup_lang(zahl, map, Lang::De)
-    }
-
-    pub fn reduce_number_steps_with_cipher(input: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
-        if input == "11" || input == "22" || input == "33" {
-            let line = format!("{input} ist eine Masterzahl → {input}");
-            return (input.parse().unwrap(), vec![line]);
-        }
-
-        let values: Vec<u32> = input.chars().map(|ch| cipher.char_to_value(ch)).collect();
-        let mut num: u32 = values.iter().sum();
-
-        let mut lines = Vec::new();
-        lines.push(format!(
-            "{} = {}",
-            values
-                .iter()
-                .map(|v| v.to_string())
-                .collect::<Vec<_>>()
-                .join("+"),
-            num
-        ));
-
-        while num > 9 && !matches!(num, 11 | 22 | 33) {
-            let digits: Vec<u32> = num
-                .to_string()
-                .chars()
-                .map(|c| c.to_digit(10).unwrap())
-                .collect();
-            let sum: u32 = digits.iter().sum();
-            lines.push(format!(
-                "{} = {}",
-                digits
-                    .iter()
-                    .map(|d| d.to_string())
-                    .collect::<Vec<_>>()
-                    .join("+"),
-                sum
-            ));
-            num = sum;
-        }
-
-        lines.push(format!("→ {num}"));
-        (num, lines)
-    }
-
-    pub fn reduce_number_steps(input: &str) -> (u32, Vec<String>) {
-        let cipher = OrdinalCipher;
-        reduce_number_steps_with_cipher(input, &cipher)
-    }
-
-    pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
-        let step = Step::new(0, 0, Operation::Reduce);
-        let result = KernResult::from_input_default(input, debug, step);
-        if debug {
-            for line in &result.trace {
-                println!("{line}");
-            }
-        }
-        result.value
-    }
-
-    pub fn parse_range(spec: &str) -> std::result::Result<Vec<i32>, String> {
-        let today = Local::now().date_naive();
-
-        // A) Datums-Range: dd.mm.yyyy..dd.mm.yyyy
-        if let Some((start, end)) = spec.split_once("..") {
-            if let (Ok(sd), Ok(ed)) = (
-                NaiveDate::parse_from_str(start, "%d.%m.%Y"),
-                NaiveDate::parse_from_str(end, "%d.%m.%Y"),
-            ) {
-                let s = (sd - today).num_days() as i32;
-                let e = (ed - today).num_days() as i32;
-                let mut v = Vec::new();
-                if s <= e {
-                    for i in s..=e {
-                        v.push(i);
-                    }
-                } else {
-                    for i in (e..=s).rev() {
-                        v.push(i);
-                    }
-                }
-                return Ok(v);
-            }
-        }
-
-        // B) Einzel-Datum
-        if let Ok(d) = NaiveDate::parse_from_str(spec, "%d.%m.%Y") {
-            let off = (d - today).num_days() as i32;
-            return Ok(vec![off]);
-        }
-
-        // A)  -5..4   oder   3..-2
-        if let Some((a, b)) = spec.split_once("..") {
-            let s: i32 = a.parse().map_err(|_| "invalid range start")?;
-            let e: i32 = b.parse().map_err(|_| "invalid range end")?;
-            let mut v = Vec::new();
-            if s <= e {
-                for i in s..=e {
-                    v.push(i);
-                }
-            } else {
-                for i in (e..=s).rev() {
-                    v.push(i);
-                }
-            }
-            return Ok(v);
-        }
-
-        // B) alte Syntax  0+3 / 0-3
-        let re = Regex::new(r"^([+-]?\d+)([+-])(\d+)$").unwrap();
-        if let Some(c) = re.captures(spec) {
-            let start: i32 = c[1].parse().unwrap();
-            let end_off: i32 = c[3].parse().unwrap();
-            let end = if &c[2] == "+" { end_off } else { -end_off };
-            let mut v = Vec::new();
-            if start <= end {
-                for i in start..=end {
-                    v.push(i);
-                }
-            } else {
-                for i in (end..=start).rev() {
-                    v.push(i);
-                }
-            }
-            return Ok(v);
-        }
-
-        // C) Einzelwert
-        spec.parse::<i32>()
-            .map(|v| vec![v])
-            .map_err(|_| "invalid range specification".into())
     }
 }

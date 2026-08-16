@@ -102,7 +102,7 @@ pub fn wrap_text(text: &str, indent: usize, max_width: Option<usize>) -> String 
     for word in text.split_whitespace() {
         if current_line.is_empty() {
             current_line = word.to_string();
-        } else if current_line.len() + word.len() + 1 <= available {
+        } else if current_line.len() + word.len() < available {
             current_line.push(' ');
             current_line.push_str(word);
         } else {
