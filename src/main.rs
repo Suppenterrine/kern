@@ -441,12 +441,12 @@ fn main() {
 
                 let mut pipeline = Pipeline::new();
                 for idx in 0..inputs.len() {
-                    pipeline.add_step(Step::new(idx, 0, Operation::DateReduce));
+                    pipeline.add_step(Step::new(idx, Operation::DateReduce));
                 }
 
                 // Add lookup operation if requested
                 if show_lookup {
-                    pipeline.add_step(Step::new(0, 0, Operation::Lookup));
+                    pipeline.add_step(Step::new(0, Operation::Lookup));
                 }
 
                 let mut ctx = FlowContext::new(FlowFlags {
@@ -597,11 +597,11 @@ fn main() {
 
             // Build and execute pipeline
             let mut pipeline = Pipeline::new();
-            let step = Step::new(0, 0, Operation::Reduce);
+            let step = Step::new(0, Operation::Reduce);
             pipeline.add_step(step);
             
             // Add lookup for meanings
-            let lookup_step = Step::new(0, 0, Operation::Lookup);
+            let lookup_step = Step::new(0, Operation::Lookup);
             pipeline.add_step(lookup_step);
 
             let mut ctx = FlowContext::new(FlowFlags {
@@ -737,12 +737,12 @@ fn main() {
 
         if show_total {
             let pipe_index = args.len().saturating_sub(1);
-            pipeline.add_step(Step::new(pipe_index, 0, Operation::AggregateTotal));
+            pipeline.add_step(Step::new(pipe_index, Operation::AggregateTotal));
         }
 
         if show_lookup {
             let pipe_index = args.len().saturating_sub(1);
-            pipeline.add_step(Step::new(pipe_index, 0, Operation::Lookup));
+            pipeline.add_step(Step::new(pipe_index, Operation::Lookup));
         }
 
         let mut ctx = FlowContext::new(FlowFlags {
@@ -783,7 +783,6 @@ fn main() {
                 Operation::AggregateTotal => aggregate_results.push(result),
                 Operation::Lookup => lookup_results.push(result),
                 Operation::PhaseRelation => {}, // Handled separately
-                Operation::Custom(_) => {}
             }
         }
 
@@ -879,7 +878,7 @@ fn main() {
                 .filter(|res| {
                     matches!(
                         res.step.operation,
-                        Operation::Reduce | Operation::DateReduce | Operation::Custom(_)
+                        Operation::Reduce | Operation::DateReduce
                     )
                 })
                 .collect();
@@ -1278,7 +1277,7 @@ fn parse_pipeline_tokens(
 
         // Create PhaseRelation steps for each pair
         for (left_idx, right_idx) in pairs {
-            let step = Step::new(0, 0, Operation::PhaseRelation)
+            let step = Step::new(0, Operation::PhaseRelation)
                 .with_metadata(StepMetadata::PhaseRelation {
                     left_index: left_idx,
                     right_index: right_idx,
@@ -1295,7 +1294,7 @@ fn parse_pipeline_tokens(
 
     // Regular mode: create reduce steps
     for (idx, _input) in inputs.iter().enumerate() {
-        let step = Step::new(idx, 0, Operation::Reduce);
+        let step = Step::new(idx, Operation::Reduce);
         steps.push(step);
     }
 

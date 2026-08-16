@@ -24,7 +24,6 @@ Drei Typen:
 | `AggregateTotal` | summiert alle bisherigen Reduce-Ergebnisse aus `ctx.memory` |
 | `Lookup` | gruppiert alle bisherigen Werte aus `ctx.memory` nach Zahl, legt sie als JSON-Payload ab |
 | `PhaseRelation` | reduziert zwei Inputs und berechnet ihre Phase |
-| `Custom(String)` | **nichts** |
 
 Jedes Ergebnis wandert in `ctx.memory` *und* in das zurückgegebene `ResultSet`.
 
@@ -55,52 +54,33 @@ Aufrufer die Schritte in der richtigen Reihenfolge anhängen.
 
 ---
 
-## Was verspricht, was es nicht hält
+## Aufgeräumt in v4.0.0
 
-Die Abstraktion ist erkennbar für mehr entworfen worden, als sie tut:
+Die Engine hatte vier Stellen, die nach Funktionalität aussahen, aber keine
+hatten. Sie sind entfernt — das Verhalten hat sich dadurch nicht geändert, es
+steht nur weniger da, das nicht stimmt:
 
-- **`Operation::Custom(String)`** — wird nirgends erzeugt und tut im Rumpf
-  nichts. Ein Platzhalter ohne Inhalt.
-- **`select_ciphers(&self, _step, …)`** — der `_step`-Parameter wird nicht
-  benutzt. Die Chiffren-Auswahl kommt ausschließlich aus den globalen Flags.
-  Gedacht war offensichtlich eine Auswahl **pro Schritt**; das war die Grundlage
-  der „lokalen Flags", die es nie gab (siehe [cli-arguments.md](cli-arguments.md)).
-- **`Step::cipher_index`** — der beim Anlegen übergebene Wert ist bedeutungslos.
-  `run()` überschreibt ihn (`ctx_step.cipher_index = cipher_index`), bevor er
-  irgendwo gelesen wird. Alle Aufrufer übergeben deshalb `0`.
-- **Der Rückgabewert `ResultSet`** — im SPEKTRA-Pfad des Servers wird er
-  verworfen (`let _result_set = …`) und stattdessen `ctx.memory` gelesen. Es
-  gibt also zwei Wege an dieselben Daten, und der Code benutzt beide.
+| Entfernt | War |
+|----------|-----|
+| `Operation::Custom(String)` | wurde nirgends erzeugt, der Zweig war leer |
+| `_step` in `select_ciphers` | Parameter wurde nie gelesen; Auswahl ist global |
+| `cipher_index` in `Step::new` | von `run()` überschrieben, bevor ihn jemand las |
+| verworfenes `ResultSet` im SPEKTRA-Pfad | Rückgabewert weggeworfen zugunsten von `ctx.memory` |
 
----
+`Step::new` nimmt seitdem `(pipe_index, operation)`. Der `cipher_index` bleibt
+im `Step` — `run()` setzt ihn je Chiffre —, ist aber kein Konstruktor-Argument
+mehr.
 
-## Einschätzung
+## Was noch offen ist
 
-Für das, was tatsächlich passiert — eine lineare Kette aus Reduktionen mit zwei
-optionalen Nachbearbeitungen — ist das mehr Maschinerie als nötig. Der Preis
-ist nicht Laufzeit, sondern Lesbarkeit: Wer `Custom` oder `cipher_index` sieht,
-nimmt an, dass es etwas bedeutet.
+Der **Reihenfolge-Vertrag** ist weiterhin ungeschrieben und ungeprüft:
+`AggregateTotal` und `Lookup` müssen nach den Reduce-Schritten eingefügt
+werden. Wer sie davor anhängt, bekommt eine leere `memory` und stillschweigend
+0 bzw. eine leere Liste.
 
-**Empfehlung im Klartext:** Die Engine **bleibt**, so wie sie ist. Sie
-funktioniert, und sie neu zu schreiben wäre Risiko ohne Gegenwert. Was
-verschwinden sollte, sind nur die **Attrappen** — die vier Stellen unten, die
-nach Funktionalität aussehen, aber keine haben. Das ist Löscharbeit, kein
-Umbau: nichts ändert sein Verhalten, es steht danach nur weniger da, das nicht
-stimmt.
-
-Konkret zu entfernen:
-
-1. `Operation::Custom` entfernen (nichts erzeugt es)
-2. `_step` aus `select_ciphers` entfernen oder die Auswahl pro Schritt wirklich
-   implementieren — je nachdem, ob sie gewollt ist
-3. `cipher_index` aus `Step::new` nehmen, da `run()` ihn ohnehin setzt
-4. Den Reihenfolge-Vertrag entweder dokumentieren oder erzwingen, z. B. indem
-   `Pipeline` die Nachbearbeitungsschritte selbst ans Ende sortiert
-
-Punkt 4 ist der einzige, der echte Arbeit wäre. Die Punkte 1–3 sind reines
-Streichen. Noch nicht gemacht; steht in [TODO.md](../TODO.md) und Issue #23.
-
----
+Möglich wäre, dass `Pipeline` die Nachbearbeitungsschritte selbst ans Ende
+sortiert, statt es den Aufrufern zu überlassen. Bis dahin steht der Vertrag
+zumindest hier.
 
 ## Wer Pipelines baut
 
@@ -111,7 +91,9 @@ Streichen. Noch nicht gemacht; steht in [TODO.md](../TODO.md) und Issue #23.
 | `main.rs` Normalmodus | `Reduce` je Input, optional `AggregateTotal`, optional `Lookup` |
 | `kern-server.rs` SPEKTRA | `Reduce` + `Lookup` |
 | `kern-server.rs` Phase | `PhaseRelation` je Paar |
+| `kern-server.rs` `/reduce` | `Reduce` je Input, optional `AggregateTotal` |
 
-Der `/reduce`-Endpunkt des Servers benutzt die Engine **gar nicht** — er
-rechnet direkt in `reduce_number_steps_with_cipher`. Das ist einer der Gründe,
-warum CLI und Server bei `reduce` unterschiedlich viel ausgeben (Issue #23).
+Seit v4.0.0 läuft auch `/reduce` über die Engine. Vorher rechnete der Endpunkt
+direkt, mit einer **privaten Kopie** der Reduktionsroutine — weshalb CLI und
+Server sich beim `chain`-Format und bei dem, worüber ein `total` summiert,
+widersprachen (Issue #23). Die Kopie ist entfernt.

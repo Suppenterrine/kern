@@ -67,7 +67,7 @@ impl Pipeline {
             match &step.operation {
                 Operation::Reduce | Operation::DateReduce => {
                     if let Some(input) = inputs.get(step.pipe_index) {
-                        for (cipher_index, cipher) in self.select_ciphers(step, ciphers, &ctx.global_flags.ciphers) {
+                        for (cipher_index, cipher) in self.select_ciphers(ciphers, &ctx.global_flags.ciphers) {
                             let mut ctx_step = step.clone();
                             ctx_step.cipher_index = cipher_index;
 
@@ -89,7 +89,7 @@ impl Pipeline {
                         .filter(|res| {
                             matches!(
                                 res.step.operation,
-                                Operation::Reduce | Operation::DateReduce | Operation::Custom(_)
+                                Operation::Reduce | Operation::DateReduce
                             )
                         })
                         .map(|res| res.value())
@@ -116,7 +116,7 @@ impl Pipeline {
                     for res in &ctx.memory {
                         if matches!(
                             res.step.operation,
-                            Operation::Reduce | Operation::DateReduce | Operation::Custom(_)
+                            Operation::Reduce | Operation::DateReduce
                         ) {
                             match grouped.entry(res.value()) {
                                 Entry::Occupied(mut occ) => {
@@ -177,7 +177,7 @@ impl Pipeline {
                             (inputs.get(*left_index), inputs.get(*right_index)) {
 
                             // Process with each selected cipher
-                            for (cipher_index, cipher) in self.select_ciphers(step, ciphers, &ctx.global_flags.ciphers) {
+                            for (cipher_index, cipher) in self.select_ciphers(ciphers, &ctx.global_flags.ciphers) {
                                 let mut ctx_step = step.clone();
                                 ctx_step.cipher_index = cipher_index;
 
@@ -210,20 +210,20 @@ impl Pipeline {
                         }
                     }
                 }
-                Operation::Custom(_) => {
-                    // Placeholder for future extensions.
-                }
             }
         }
 
         result_set
     }
 
+    /// Ciphers selected by the global flags. There is deliberately no `step`
+    /// parameter: selection is global, and a step argument that was accepted
+    /// and then ignored suggested a per-step choice that never existed.
+    ///
     /// Hands back `&dyn Cipher` rather than `&Box<dyn Cipher>`: the caller only
     /// ever calls trait methods, so the extra indirection tells it nothing.
     fn select_ciphers<'a>(
         &self,
-        _step: &Step,
         ciphers: &'a [Box<dyn Cipher>],
         global_cipher_names: &[String],
     ) -> Vec<(usize, &'a dyn Cipher)> {

@@ -7,8 +7,8 @@ use axum::{
 use chrono::{Duration, Local};
 use kern::core::{
     Bedeutung, Cipher, ErrorCode, FlowContext, FlowFlags, KernResult, Lang, Operation, Pipeline,
-    Step, StepMetadata, alphabet_index, descriptors, generate_matrix_pairs, load_all_bedeutungen,
-    lookup_lang, parse_range, reduce_number_steps, reduce_number_verbose,
+    Step, StepMetadata, alphabet_index, default_cipher, descriptors, generate_matrix_pairs,
+    load_all_bedeutungen, lookup_lang, parse_range, reduce_number_steps,
 };
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -361,7 +361,8 @@ async fn reduce_handler(
         ));
     }
 
-    // Build cipher instances if using multi-cipher mode
+    // Without a cipher parameter the endpoint reduces with the default cipher
+    // only, and reports a single value per input rather than a list.
     let ciphers: Vec<Box<dyn Cipher>> = if use_multi_cipher {
         let all_descriptors = descriptors();
         let mut result = Vec::new();
@@ -378,81 +379,85 @@ async fn reduce_handler(
         }
         result
     } else {
-        vec![]
+        vec![default_cipher()]
     };
 
-    let mut results = Vec::new();
-    let mut items = Vec::new();
+    // The same engine the CLI runs on. This endpoint used to reduce inline with
+    // a private copy of the reduction routine, so the two disagreed on the shape
+    // of `chain` and on what a total sums over (issue #23).
+    let inputs: Vec<String> = inputs.iter().map(|s| s.to_string()).collect();
+    let cipher_names: Vec<String> = ciphers.iter().map(|c| c.name().to_string()).collect();
 
-    for word in &inputs {
+    let mut pipeline = Pipeline::new();
+    for idx in 0..inputs.len() {
+        pipeline.add_step(Step::new(idx, Operation::Reduce));
+    }
+    if params.total {
+        // Must come after the reduce steps — AggregateTotal reads what they left
+        // behind. See docs/reference/flow-engine.md.
+        pipeline.add_step(Step::new(
+            inputs.len().saturating_sub(1),
+            Operation::AggregateTotal,
+        ));
+    }
+
+    let mut ctx = FlowContext::new(FlowFlags {
+        verbose: params.debug,
+        ciphers: cipher_names,
+        total: params.total,
+    });
+    let result_set = pipeline.run(&mut ctx, &inputs, &ciphers);
+
+    // Group the reduce results back onto their input.
+    let mut items: Vec<ReduceItem> = Vec::new();
+    for (idx, word) in inputs.iter().enumerate() {
+        let per_cipher: Vec<&KernResult> = result_set
+            .iter()
+            .filter(|r| matches!(r.step.operation, Operation::Reduce) && r.step.pipe_index == idx)
+            .collect();
+
+        let length = params.length.then(|| word.chars().count());
+
         if use_multi_cipher {
-            // Multi-cipher mode: calculate value for each cipher
-            let mut cipher_results = Vec::new();
-
-            for cipher in &ciphers {
-                let (value, chain) = reduce_number_steps_with_cipher(word, cipher.as_ref());
-                cipher_results.push(CipherResult {
-                    name: cipher.name().to_string(),
+            let cipher_results = per_cipher
+                .iter()
+                .map(|r| CipherResult {
+                    name: r.cipher.clone(),
                     code: descriptors()
                         .iter()
-                        .find(|d| d.name == cipher.name())
+                        .find(|d| d.name == r.cipher)
                         .map(|d| d.short.to_string())
                         .unwrap_or_else(|| "unknown".to_string()),
-                    value,
-                    chain: if params.debug { Some(chain) } else { None },
-                });
-            }
+                    value: r.value,
+                    chain: params.debug.then(|| r.trace.clone()),
+                })
+                .collect();
 
-            // Use first cipher's value for total calculation (or could sum all)
-            let first_value = cipher_results.first().map(|cr| cr.value).unwrap_or(0);
-            results.push(first_value);
-
-            {
-                items.push(ReduceItem {
-                    input: word.to_string(),
-                    length: if params.length {
-                        Some(word.chars().count())
-                    } else {
-                        None
-                    },
-                    ciphers: Some(cipher_results),
-                    value: None,
-                    chain: None,
-                });
-            }
+            items.push(ReduceItem {
+                input: word.clone(),
+                length,
+                ciphers: Some(cipher_results),
+                value: None,
+                chain: None,
+            });
         } else {
-            // Legacy single-cipher mode (default Ordinal)
-            let (value, chain) = reduce_number_steps(word);
-            results.push(value);
-            {
-                items.push(ReduceItem {
-                    input: word.to_string(),
-                    length: if params.length {
-                        Some(word.chars().count())
-                    } else {
-                        None
-                    },
-                    ciphers: None,
-                    value: Some(value),
-                    chain: if params.debug { Some(chain) } else { None },
-                });
-            }
+            let first = per_cipher.first();
+            items.push(ReduceItem {
+                input: word.clone(),
+                length,
+                ciphers: None,
+                value: first.map(|r| r.value),
+                chain: params.debug.then(|| first.map(|r| r.trace.clone()).unwrap_or_default()),
+            });
         }
     }
 
-    // Only computed when asked for. Reporting a total nobody requested made it
-    // impossible to tell a real total from a default (issue #23).
-    let (total, total_chain) = if params.total {
-        let sum: u32 = results.iter().sum();
-        if params.debug {
-            let (val, chain) = reduce_number_steps(&sum.to_string());
-            (Some(val), Some(chain))
-        } else {
-            (Some(reduce_number_verbose(&sum.to_string(), false)), None)
-        }
-    } else {
-        (None, None)
-    };
+    // Only reported when asked for (issue #23).
+    let aggregate = result_set
+        .iter()
+        .find(|r| matches!(r.step.operation, Operation::AggregateTotal));
+    let total = aggregate.map(|r| r.value);
+    let total_chain = aggregate.filter(|_| params.debug).map(|r| r.trace.clone());
 
     let response = ReduceResponse {
         items,
@@ -461,38 +466,6 @@ async fn reduce_handler(
     };
 
     Ok(Json(response))
-}
-
-// Helper function to reduce with a specific cipher
-fn reduce_number_steps_with_cipher(s: &str, cipher: &dyn Cipher) -> (u32, Vec<String>) {
-    let mut chain = Vec::new();
-    let mut current = s.to_string();
-    chain.push(current.clone());
-
-    // Calculate initial sum using cipher
-    let mut sum: u32 = current
-        .chars()
-        .filter_map(|ch| {
-            let val = cipher.char_to_value(ch);
-            if val > 0 { Some(val) } else { None }
-        })
-        .sum();
-
-    // Reduce until we hit a master number or single digit
-    loop {
-        if sum < 10 || sum == 11 || sum == 22 || sum == 33 {
-            break;
-        }
-        current = sum.to_string();
-        chain.push(current.clone());
-        sum = current.chars().filter_map(|c| c.to_digit(10)).sum();
-    }
-
-    if sum >= 10 {
-        chain.push(sum.to_string());
-    }
-
-    (sum, chain)
 }
 
 // ============================================================================
@@ -813,11 +786,11 @@ async fn spektra_handler(
 
     // Build and execute pipeline
     let mut pipeline = Pipeline::new();
-    let step = Step::new(0, 0, Operation::Reduce);
+    let step = Step::new(0, Operation::Reduce);
     pipeline.add_step(step);
 
     // Add lookup for meanings
-    let lookup_step = Step::new(0, 0, Operation::Lookup);
+    let lookup_step = Step::new(0, Operation::Lookup);
     pipeline.add_step(lookup_step);
 
     let mut ctx = FlowContext::new(FlowFlags {
@@ -826,11 +799,12 @@ async fn spektra_handler(
         total: false,
     });
 
-    let _result_set = pipeline.run(&mut ctx, std::slice::from_ref(word), &spektra_ciphers);
+    let result_set = pipeline.run(&mut ctx, std::slice::from_ref(word), &spektra_ciphers);
 
-    // Collect results from memory (all reduce operations)
-    let reduce_results: Vec<KernResult> = ctx
-        .memory
+    // Read the reduce results from the return value rather than from
+    // ctx.memory. Both hold the same data; using the return value keeps the
+    // context an implementation detail of the run.
+    let reduce_results: Vec<KernResult> = result_set
         .iter()
         .filter(|res| matches!(res.step.operation, Operation::Reduce))
         .cloned()
@@ -969,7 +943,7 @@ async fn phase_handler(
     // Build pipeline with PhaseRelation steps
     let mut pipeline = Pipeline::new();
     for (left_idx, right_idx) in pairs {
-        let step = Step::new(0, 0, Operation::PhaseRelation)
+        let step = Step::new(0, Operation::PhaseRelation)
             .with_metadata(StepMetadata::PhaseRelation {
                 left_index: left_idx,
                 right_index: right_idx,
