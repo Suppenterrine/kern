@@ -21,14 +21,57 @@ abhängen würde — siehe [PRINCIPLES §4](../PRINCIPLES.md).
 | `cargo xtask sync-version` | Schreibt die `Cargo.toml`-Version in alle abgeleiteten Dateien |
 | `cargo xtask sync-version --check` | Meldet Drift, schreibt nichts, Exit 1 bei Abweichung |
 | `cargo xtask check-error-codes` | Vergleicht `ErrorCode::API` mit der OpenAPI-Spec |
-| `cargo xtask check-tag <TAG>` | Prüft, ob ein Release-Tag zur `Cargo.toml`-Version passt |
+| `cargo xtask check-release` | Release Note vorhanden? Tag noch frei? |
 | `cargo xtask bump version <major\|minor\|patch>` | Bumpt `Cargo.toml` und synchronisiert danach |
 
 `check` sammelt **alle** Fehlschläge und meldet sie gemeinsam, statt beim ersten
 abzubrechen — ein Durchlauf sagt dir alles, was zu tun ist.
 
-`check-tag` ist nicht Teil von `check`, weil es ein Argument braucht; es läuft
-nur im Release-Workflow.
+`check-release` ist bewusst **nicht** Teil von `check`: während der Entwicklung
+hat die nächste Version noch keine Release Note, und eine Prüfung, die bei
+jedem PR fehlschlägt, gewöhnt man sich ab zu lesen.
+
+---
+
+## Release-Ablauf
+
+Ausgelöst wird über `workflow_dispatch`, nicht durch ein von Hand angelegtes
+Release:
+
+```bash
+cargo set-version 2.1.0        # einzige Quelle der Wahrheit
+cargo xtask sync-version       # abgeleitete Stellen nachziehen
+$EDITOR docs/release-notes/2.1.0.md
+cargo xtask check-release      # vorab prüfen
+# committen, mergen, dann:
+gh workflow run release.yml
+```
+
+Der Workflow:
+
+```
+create-release   Gate (check, check-release, tests) → Draft anlegen
+    ├─ build-win      kern.exe, kern-server.exe → Draft
+    └─ build-linux    kern-server → Draft, Docker → GHCR
+publish-release  Artefakte wirklich da? → veröffentlichen
+```
+
+Zwei Eigenschaften, die den Unterschied machen:
+
+**Der Tag wird abgeleitet, nicht getippt.** Die Version kommt aus `Cargo.toml`,
+der Tag ist `v<version>`. Eine Abweichung zwischen Tag und ausgelieferter
+Version ist damit nicht mehr erkennbar-aber-möglich, sondern unmöglich. Deshalb
+gibt es auch kein `check-tag` mehr — es könnte nur noch tautologisch bestehen.
+
+**Veröffentlicht wird zuletzt.** Schlägt ein Build fehl, läuft
+`publish-release` nie und das Release bleibt ein Draft: sichtbar für den, der
+nachschaut, unsichtbar für alle anderen. Vorher war es umgekehrt — das Release
+war öffentlich, bevor der erste Build lief, sodass ein fehlgeschlagener
+Docker-Push ein unvollständiges Release unter deinem Namen hinterließ.
+
+`publish-release` prüft zusätzlich, dass die drei Artefakte tatsächlich am
+Release hängen und nicht leer sind. Ein Job kann Erfolg melden, ohne dass sein
+Upload angekommen ist.
 
 ---
 
@@ -38,16 +81,8 @@ nur im Release-Workflow.
 |----------|-----|------|--------|
 | `rust.yml` | `build` | Push auf `master`, PRs nach `master` | `cargo build`, `cargo test` |
 | `rust.yml` | `consistency` | dito | `cargo xtask check` |
-| `release.yml` | `consistency` | veröffentlichtes Release | `cargo xtask check`, `check-tag`, `cargo test` |
-
-Im Release-Workflow ist `consistency` ein **Gate**: `build-win` hängt per
-`needs` daran, `build-linux` wiederum an `build-win`. Schlägt das Gate fehl,
-werden weder Binaries hochgeladen noch ein Docker-Image nach GHCR gepusht.
-
-Der Tag-Check ist dabei der wichtigste: ohne ihn kann ein als `v2.0.0`
-getaggtes Release Binaries ausliefern, die sich als `1.2.0` melden — dieselbe
-Drift, die `sync-version` innerhalb des Repos verhindert, nur an der
-Release-Grenze.
+| `release.yml` | `create-release` | manuell ausgelöst | `check`, `check-release`, Tests, Draft |
+| `release.yml` | `publish-release` | nach allen Builds | Artefakt-Prüfung, Veröffentlichung |
 
 ---
 

@@ -1,23 +1,27 @@
 name: KERN Release
 
-on:
-  release:
-    types: [published]
+# Manuell ausgelöst, nicht durch ein von Hand angelegtes Release. Der Ablauf:
+# Draft anlegen → bauen → prüfen, dass die Artefakte wirklich angekommen sind →
+# erst dann veröffentlichen. Scheitert irgendetwas, bleibt es ein Draft:
+# sichtbar für den, der nachschaut, unsichtbar für alle anderen.
+#
+# Vorher stand es umgekehrt — das Release war veröffentlicht, bevor der erste
+# Build lief. Ein fehlgeschlagener Docker-Push hinterließ damit ein öffentliches
+# Release mit fehlenden Artefakten, unter deinem Namen.
+on: workflow_dispatch
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ---- 0) Konsistenz-Gate -------------------------------------------------
-  # Nichts wird veröffentlicht, bevor das hier grün ist. Deckt ab:
-  #   - Tests
-  #   - Version in allen abgeleiteten Dateien identisch
-  #   - dokumentierte Fehlercodes == tatsächlich ausgegebene
-  #   - Release-Tag == Cargo.toml-Version
-  # Ohne das könnte ein Release als v2.0.0 getaggt sein und Binaries
-  # ausliefern, die sich als 1.2.0 melden. Siehe docs/PRINCIPLES.md.
-  consistency:
+  # ---- 1) Gate + Draft ----------------------------------------------------
+  create-release:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
+    outputs:
+      release-id: ${{ steps.draft.outputs.result }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,7 +32,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Rust (nightly)
         uses: actions-rs/toolchain@v1
@@ -39,16 +43,53 @@ jobs:
       - name: Consistency checks
         run: cargo xtask check
 
-      - name: Release tag matches the crate version
-        run: cargo xtask check-tag "${{ github.ref_name }}"
+      # Prüft, dass die Release Note existiert und der Tag noch frei ist —
+      # bevor irgendetwas auf GitHub angelegt wird.
+      - name: Release readiness
+        run: cargo xtask check-release
 
       - name: Tests
         run: cargo test
 
-  # ---- 1) Windows-Builds (CLI & Server) per Matrix ------------------------
+      # Die Version kommt aus Cargo.toml, dem einzigen Ort, an dem sie steht.
+      # Der Tag wird daraus abgeleitet und nirgends getippt — damit kann er
+      # nicht von der ausgelieferten Version abweichen.
+      - name: Read version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No version found in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION"
+
+      - name: Create draft release
+        id: draft
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const version = '${{ steps.version.outputs.version }}';
+            const body = fs.readFileSync(`docs/release-notes/${version}.md`, 'utf8');
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${version}`,
+              name: `KERN v${version}`,
+              body,
+              draft: true,
+              prerelease: false,
+            });
+            core.info(`Draft release ${data.id} for v${version}`);
+            return data.id;
+
+  # ---- 2) Windows-Builds (CLI & Server) -----------------------------------
   build-win:
-    needs: consistency
-    if: contains(github.event.release.body, '[KERN]') || contains(github.event.release.body, '[SERVER]')
+    needs: create-release
+    permissions:
+      contents: write
     runs-on: windows-latest
     strategy:
       matrix:
@@ -74,16 +115,27 @@ jobs:
       - name: Build ${{ matrix.bin }}.exe
         run: cargo build --release --bin ${{ matrix.bin }}
 
-      - name: Upload ${{ matrix.bin }}.exe to Release
-        uses: softprops/action-gh-release@v1
+      # Upload über die Release-ID statt über den Tag: der Tag existiert bei
+      # einem Draft noch nicht als Git-Ref, ein Upload "per Tag" könnte also
+      # ein zweites Release anlegen.
+      - name: Upload ${{ matrix.bin }}.exe to the draft
+        uses: actions/github-script@v7
         with:
-          files: target/release/${{ matrix.bin }}.exe
-          token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const name = '${{ matrix.bin }}.exe';
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release-id }},
+              name,
+              data: fs.readFileSync(`target/release/${name}`),
+            });
+            core.info(`Uploaded ${name}`);
 
-  # ---- 2) Linux-Server + Docker ------------------------------------------
+  # ---- 3) Linux-Server + Docker -------------------------------------------
   build-linux:
-    if: contains(github.event.release.body, '[SERVER]')
-    needs: build-win
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -108,11 +160,19 @@ jobs:
       - name: Build kern-server (Linux)
         run: cargo build --release --bin kern-server
 
-      - name: Upload Linux-Binary to Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload kern-server to the draft
+        uses: actions/github-script@v7
         with:
-          files: target/release/kern-server
-          token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release-id }},
+              name: 'kern-server',
+              data: fs.readFileSync('target/release/kern-server'),
+            });
+            core.info('Uploaded kern-server');
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -124,11 +184,65 @@ jobs:
       - name: Build & Push Docker Image to GHCR
         run: |
           REPO_OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          VERSION="v${{ needs.create-release.outputs.version }}"
           docker build \
             --build-arg BUILD_BIN=kern-server \
-            -t ghcr.io/${REPO_OWNER_LC}/kern-server:${{ github.ref_name }} \
+            -t ghcr.io/${REPO_OWNER_LC}/kern-server:${VERSION} \
             -t ghcr.io/${REPO_OWNER_LC}/kern-server:latest \
             .
-          docker push ghcr.io/${REPO_OWNER_LC}/kern-server:${{ github.ref_name }}
+          docker push ghcr.io/${REPO_OWNER_LC}/kern-server:${VERSION}
           docker push ghcr.io/${REPO_OWNER_LC}/kern-server:latest
-        # Note: Image is now on ghcr.io/suppenterrine/kern-server
+
+  # ---- 4) Veröffentlichen -------------------------------------------------
+  # `needs` macht die eigentliche Arbeit: schlägt ein Build fehl, läuft dieser
+  # Job nie und das Release bleibt ein Draft.
+  publish-release:
+    needs: [create-release, build-win, build-linux]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      # Zweite Verteidigungslinie: ein Job kann Erfolg melden, ohne dass sein
+      # Artefakt am Release angekommen ist.
+      - name: Verify all artifacts reached the release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const releaseId = ${{ needs.create-release.outputs.release-id }};
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+              per_page: 100,
+            });
+
+            const present = assets.map((a) => a.name);
+            const expected = ['kern.exe', 'kern-server.exe', 'kern-server'];
+            const missing = expected.filter((name) => !present.includes(name));
+
+            if (missing.length > 0) {
+              throw new Error(
+                `release is missing: ${missing.join(', ')} (present: ${present.join(', ') || 'nothing'})`
+              );
+            }
+
+            const empty = assets.filter((a) => a.size === 0).map((a) => a.name);
+            if (empty.length > 0) {
+              throw new Error(`uploaded but empty: ${empty.join(', ')}`);
+            }
+
+            core.info(`All ${expected.length} artifacts present: ${present.join(', ')}`);
+
+      - name: Publish
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = '${{ needs.create-release.outputs.version }}';
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: ${{ needs.create-release.outputs.release-id }},
+              draft: false,
+              make_latest: 'true',
+            });
+            core.notice(`Published KERN v${version}`);

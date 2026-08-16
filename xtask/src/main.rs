@@ -20,7 +20,7 @@ Usage:
   cargo xtask check                    Run every consistency check (CI gate)
   cargo xtask sync-version [--check]   Write the Cargo.toml version into all derived files
   cargo xtask check-error-codes        Verify the OpenAPI spec matches ErrorCode::API
-  cargo xtask check-tag <TAG>          Verify a release tag matches the Cargo.toml version
+  cargo xtask check-release            Verify the repo is ready to cut a release
   cargo xtask bump version <major|minor|patch>
 
 The --check forms write nothing and exit non-zero on drift.";
@@ -34,7 +34,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         ["sync-version"] => sync_version(&root, false),
         ["sync-version", "--check"] => sync_version(&root, true),
         ["check-error-codes"] => check_error_codes(&root),
-        ["check-tag", tag] => check_tag(&root, tag),
+        ["check-release"] => check_release(&root),
         ["bump", "version", kind] => bump(&root, kind),
         _ => {
             eprintln!("{USAGE}");
@@ -43,24 +43,68 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 }
 
-/// Verifies that a release tag names the version actually being built.
+/// Verifies the repo can actually produce a release for the current version.
 ///
-/// Without this, a release tagged `v2.0.0` can happily publish binaries that
-/// report `1.2.0`, which is the same drift `sync-version` prevents inside the
-/// repo — just at the release boundary. A leading `v` is accepted.
-fn check_tag(root: &Path, tag: &str) -> Result<(), Box<dyn Error>> {
+/// The release workflow derives the tag from `Cargo.toml`, so a tag that
+/// disagrees with the version is impossible by construction — there is nothing
+/// left to compare. What can still go wrong is caught here, before anything is
+/// created on GitHub:
+///
+///   - the version was never bumped, so its tag already exists
+///   - nobody wrote the release note, which cannot be fixed after publishing
+///     without editing a live release
+///
+/// Deliberately not part of `check`: during normal development the next
+/// version has no release note yet, and a check that fails on every PR is a
+/// check people learn to ignore.
+fn check_release(root: &Path) -> Result<(), Box<dyn Error>> {
     let version = cargo_version(root)?;
-    let tag_version = tag.trim().trim_start_matches('v');
+    let tag = format!("v{version}");
+    let mut problems = Vec::new();
 
-    if tag_version == version {
-        println!("  ok      tag '{tag}' matches Cargo.toml ({version})");
+    println!("  version {version}");
+
+    let notes = root.join("docs/release-notes").join(format!("{version}.md"));
+    match fs::read_to_string(&notes) {
+        Ok(text) if text.trim().is_empty() => problems.push(format!(
+            "docs/release-notes/{version}.md is empty — it becomes the release body"
+        )),
+        Ok(text) => println!(
+            "  ok      release note present ({} lines)",
+            text.lines().count()
+        ),
+        Err(_) => problems.push(format!(
+            "docs/release-notes/{version}.md is missing. Write it before releasing — \
+             it becomes the release body and cannot be added later without editing \
+             a published release"
+        )),
+    }
+
+    match std::process::Command::new("git")
+        .args(["tag", "--list", &tag])
+        .current_dir(root)
+        .output()
+    {
+        Ok(out) if !String::from_utf8_lossy(&out.stdout).trim().is_empty() => {
+            problems.push(format!(
+                "tag {tag} already exists — bump first with \
+                 `cargo set-version <VERSION> && cargo xtask sync-version`"
+            ));
+        }
+        Ok(_) => println!("  ok      tag {tag} is free"),
+        Err(e) => problems.push(format!("could not run git to check for tag {tag}: {e}")),
+    }
+
+    if problems.is_empty() {
         return Ok(());
     }
 
+    for p in &problems {
+        println!("  BLOCKED {p}");
+    }
     Err(format!(
-        "release tag '{tag}' does not match the Cargo.toml version '{version}'.\n\
-         Bump with `cargo set-version {tag_version} && cargo xtask sync-version`, \
-         or retag the release."
+        "not ready to release:\n  - {}",
+        problems.join("\n  - ")
     )
     .into())
 }
