@@ -239,9 +239,12 @@ struct ReduceParams {
     debug: bool,
     #[serde(default)]
     length: bool,
-    #[serde(rename = "onlyTotal", default)]
-    only_total: bool,
-    cipher: Option<String>, // NEW: comma-separated cipher codes or "all"
+    /// Adds the aggregate total. It used to be computed and returned always,
+    /// which meant every caller paid for it and none could tell whether it had
+    /// been asked for. Mirrors the CLI's `--total`.
+    #[serde(default)]
+    total: bool,
+    cipher: Option<String>, // comma-separated cipher codes or "all"
 }
 
 #[derive(Serialize)]
@@ -268,9 +271,9 @@ struct ReduceItem {
 
 #[derive(Serialize)]
 struct ReduceResponse {
+    items: Vec<ReduceItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    items: Option<Vec<ReduceItem>>,
-    total: u32,
+    total: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_chain: Option<Vec<String>>,
 }
@@ -404,7 +407,7 @@ async fn reduce_handler(
             let first_value = cipher_results.first().map(|cr| cr.value).unwrap_or(0);
             results.push(first_value);
 
-            if !params.only_total {
+            {
                 items.push(ReduceItem {
                     input: word.to_string(),
                     length: if params.length {
@@ -421,7 +424,7 @@ async fn reduce_handler(
             // Legacy single-cipher mode (default Ordinal)
             let (value, chain) = reduce_number_steps(word);
             results.push(value);
-            if !params.only_total {
+            {
                 items.push(ReduceItem {
                     input: word.to_string(),
                     length: if params.length {
@@ -437,17 +440,22 @@ async fn reduce_handler(
         }
     }
 
-    // Calculate total
-    let sum: u32 = results.iter().sum();
-    let (total, total_chain) = if params.debug {
-        let (val, chain) = reduce_number_steps(&sum.to_string());
-        (val, Some(chain))
+    // Only computed when asked for. Reporting a total nobody requested made it
+    // impossible to tell a real total from a default (issue #23).
+    let (total, total_chain) = if params.total {
+        let sum: u32 = results.iter().sum();
+        if params.debug {
+            let (val, chain) = reduce_number_steps(&sum.to_string());
+            (Some(val), Some(chain))
+        } else {
+            (Some(reduce_number_verbose(&sum.to_string(), false)), None)
+        }
     } else {
-        (reduce_number_verbose(&sum.to_string(), false), None)
+        (None, None)
     };
 
     let response = ReduceResponse {
-        items: if params.only_total { None } else { Some(items) },
+        items,
         total,
         total_chain,
     };
@@ -705,6 +713,10 @@ struct DateParams {
     range: String,
     #[serde(default)]
     debug: bool,
+    /// Meanings are lookup information, so they require asking for a lookup —
+    /// the same rule the CLI's `--lookup` follows.
+    #[serde(default)]
+    lookup: bool,
     lang: Option<String>, // optional: "de" (default), "en", "fr"
 }
 
@@ -713,7 +725,8 @@ struct DateItem {
     offset: i32,
     date: String,
     value: u32,
-    meaning: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meaning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chain: Option<Vec<String>>,
 }
@@ -739,12 +752,15 @@ async fn date_handler(
         let date_str = date.format("%d.%m.%Y").to_string();
         let raw = date.format("%d%m%Y").to_string();
         let (num, chain) = reduce_number_steps(&raw);
-        let meaning = lookup_lang(num, map, lang).to_string();
         dates.push(DateItem {
             offset: off,
             date: date_str,
             value: num,
-            meaning,
+            meaning: if params.lookup {
+                Some(lookup_lang(num, map, lang).to_string())
+            } else {
+                None
+            },
             chain: if params.debug { Some(chain) } else { None },
         });
     }

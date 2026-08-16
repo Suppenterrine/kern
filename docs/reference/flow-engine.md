@@ -81,9 +81,14 @@ optionalen Nachbearbeitungen — ist das mehr Maschinerie als nötig. Der Preis
 ist nicht Laufzeit, sondern Lesbarkeit: Wer `Custom` oder `cipher_index` sieht,
 nimmt an, dass es etwas bedeutet.
 
-Ein vollständiger Umbau wäre allerdings viel Risiko für wenig Gewinn — die
-Engine funktioniert. Der ehrlichere Schnitt wäre, ihr das Versprechen zu
-nehmen, das sie nicht einlöst:
+**Empfehlung im Klartext:** Die Engine **bleibt**, so wie sie ist. Sie
+funktioniert, und sie neu zu schreiben wäre Risiko ohne Gegenwert. Was
+verschwinden sollte, sind nur die **Attrappen** — die vier Stellen unten, die
+nach Funktionalität aussehen, aber keine haben. Das ist Löscharbeit, kein
+Umbau: nichts ändert sein Verhalten, es steht danach nur weniger da, das nicht
+stimmt.
+
+Konkret zu entfernen:
 
 1. `Operation::Custom` entfernen (nichts erzeugt es)
 2. `_step` aus `select_ciphers` entfernen oder die Auswahl pro Schritt wirklich
@@ -92,8 +97,8 @@ nehmen, das sie nicht einlöst:
 4. Den Reihenfolge-Vertrag entweder dokumentieren oder erzwingen, z. B. indem
    `Pipeline` die Nachbearbeitungsschritte selbst ans Ende sortiert
 
-Das ist noch nicht gemacht — es steht als offener Punkt in
-[TODO.md](../TODO.md) und in Issue #23.
+Punkt 4 ist der einzige, der echte Arbeit wäre. Die Punkte 1–3 sind reines
+Streichen. Noch nicht gemacht; steht in [TODO.md](../TODO.md) und Issue #23.
 
 ---
 
