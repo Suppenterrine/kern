@@ -138,23 +138,21 @@ pub fn format_lookup_entry(
         let show_positive = show_full || show_pos;
         let show_negative = show_full || show_neg;
 
-        if show_positive {
-            if let Some(pos) = &bed.licht {
+        if show_positive
+            && let Some(pos) = &bed.licht {
                 println!();
                 println!("{}{} Positive", INDENT_BASE, SYMBOL_POSITIVE);
                 let wrapped = wrap_text(pos, 4, None);
                 println!("{}", wrapped);
             }
-        }
 
-        if show_negative {
-            if let Some(neg) = &bed.schatten {
+        if show_negative
+            && let Some(neg) = &bed.schatten {
                 println!();
                 println!("{}{} Negative", INDENT_BASE, SYMBOL_NEGATIVE);
                 let wrapped = wrap_text(neg, 4, None);
                 println!("{}", wrapped);
             }
-        }
     }
 
     // Blank line after each entry
@@ -231,7 +229,7 @@ pub fn group_results_by_input<'a>(
     for result in results {
         grouped
             .entry(result.source.as_str())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((result.cipher.as_str(), result.value()));
     }
 
@@ -339,6 +337,80 @@ fn format_compartment_viz(value: u32, compartment: u32) -> String {
     format!("[{}] [{}] [{}]", cells[0], cells[1], cells[2])
 }
 
+/// Format a single phase relation result
+pub fn format_phase_relation_single(result: &PhaseRelationResult) {
+    println!(
+        "{}+{} = {} ({}→{}) [{}]",
+        result.left_input,
+        result.right_input,
+        format_phase(result.phase),
+        result.left_compartment,
+        result.right_compartment,
+        result.cipher
+    );
+
+    // Show compartment visualization for left input
+    println!(
+        "{} {}",
+        result.left_input,
+        format_compartment_viz(result.left_value, result.left_compartment)
+    );
+
+    // Show compartment visualization for right input
+    println!(
+        "{} {}",
+        result.right_input,
+        format_compartment_viz(result.right_value, result.right_compartment)
+    );
+}
+
+/// Format phase relation results, grouped by cipher
+pub fn format_phase_relation_results(
+    results: &[PhaseRelationResult],
+    ciphers: &[Box<dyn Cipher>],
+) {
+    if results.is_empty() {
+        println!("No phase relation results");
+        return;
+    }
+
+    // Group results by cipher
+    let mut by_cipher: HashMap<String, Vec<&PhaseRelationResult>> = HashMap::new();
+    for result in results {
+        by_cipher
+            .entry(result.cipher.clone())
+            .or_default()
+            .push(result);
+    }
+
+    // If only one cipher, show compact format with compartment viz
+    if ciphers.len() == 1 {
+        for result in results {
+            format_phase_relation_single(result);
+            println!();  // Blank line between pairs
+        }
+        return;
+    }
+
+    // Multiple ciphers: group by cipher
+    for cipher in ciphers {
+        let cipher_name = cipher.name();
+        if let Some(cipher_results) = by_cipher.get(cipher_name) {
+            println!("[{}]", cipher_name);
+            for result in cipher_results {
+                println!(
+                    "{}{}+{} = {}",
+                    INDENT_BASE,
+                    result.left_input,
+                    result.right_input,
+                    format_phase(result.phase)
+                );
+            }
+            println!();
+        }
+    }
+}
+
 #[cfg(test)]
 mod compartment_tests {
     use super::*;
@@ -388,80 +460,6 @@ mod compartment_tests {
         let inactive: Vec<&str> = out.split(' ').take(2).collect();
         for cell in inactive {
             assert!(!cell.contains('\x1b'), "inactive cell {cell:?} was marked");
-        }
-    }
-}
-
-/// Format a single phase relation result
-pub fn format_phase_relation_single(result: &PhaseRelationResult) {
-    println!(
-        "{}+{} = {} ({}→{}) [{}]",
-        result.left_input,
-        result.right_input,
-        format_phase(result.phase),
-        result.left_compartment,
-        result.right_compartment,
-        result.cipher
-    );
-
-    // Show compartment visualization for left input
-    println!(
-        "{} {}",
-        result.left_input,
-        format_compartment_viz(result.left_value, result.left_compartment)
-    );
-
-    // Show compartment visualization for right input
-    println!(
-        "{} {}",
-        result.right_input,
-        format_compartment_viz(result.right_value, result.right_compartment)
-    );
-}
-
-/// Format phase relation results, grouped by cipher
-pub fn format_phase_relation_results(
-    results: &[PhaseRelationResult],
-    ciphers: &[Box<dyn Cipher>],
-) {
-    if results.is_empty() {
-        println!("No phase relation results");
-        return;
-    }
-
-    // Group results by cipher
-    let mut by_cipher: HashMap<String, Vec<&PhaseRelationResult>> = HashMap::new();
-    for result in results {
-        by_cipher
-            .entry(result.cipher.clone())
-            .or_insert_with(Vec::new)
-            .push(result);
-    }
-
-    // If only one cipher, show compact format with compartment viz
-    if ciphers.len() == 1 {
-        for result in results {
-            format_phase_relation_single(result);
-            println!();  // Blank line between pairs
-        }
-        return;
-    }
-
-    // Multiple ciphers: group by cipher
-    for cipher in ciphers {
-        let cipher_name = cipher.name();
-        if let Some(cipher_results) = by_cipher.get(cipher_name) {
-            println!("[{}]", cipher_name);
-            for result in cipher_results {
-                println!(
-                    "{}{}+{} = {}",
-                    INDENT_BASE,
-                    result.left_input,
-                    result.right_input,
-                    format_phase(result.phase)
-                );
-            }
-            println!();
         }
     }
 }

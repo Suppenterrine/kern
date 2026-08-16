@@ -7,7 +7,6 @@ use kern::core::{
 };
 use kern::ui;
 use serde::{Deserialize, Serialize};
-use serde_json;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -30,6 +29,10 @@ impl OutputMode {
         }
     }
 }
+
+/// One line of the TTY table: cipher name, reduced value, whether the verbose
+/// trace was requested, and the trace itself.
+type CipherRow<'a> = (&'a str, u32, bool, &'a [String]);
 
 /// Error response for JSON mode
 #[derive(Serialize)]
@@ -375,7 +378,7 @@ fn main() {
 
     if matches.get_flag("list-ciphers") {
         let cipher_list: Vec<(String, String, String)> = descriptors()
-            .into_iter()
+            .iter()
             .map(|d| (d.name.to_string(), d.short.to_string(), d.description.to_string()))
             .collect();
         ui::output::format_cipher_list(&cipher_list);
@@ -454,13 +457,11 @@ fn main() {
                     vec![vec![None; selected_ciphers.len()]; inputs.len()];
 
                 for result in result_set.iter() {
-                    if matches!(result.step.operation, Operation::DateReduce) {
-                        if let Some(row) = results_matrix.get_mut(result.step.pipe_index) {
-                            if let Some(slot) = row.get_mut(result.step.cipher_index) {
+                    if matches!(result.step.operation, Operation::DateReduce)
+                        && let Some(row) = results_matrix.get_mut(result.step.pipe_index)
+                            && let Some(slot) = row.get_mut(result.step.cipher_index) {
                                 *slot = Some(result);
                             }
-                        }
-                    }
                 }
 
                 // JSON output mode for dates
@@ -491,8 +492,8 @@ fn main() {
 
                         if let Some(row_results) = results_matrix.get(row_index) {
                             for maybe_result in row_results {
-                                if let Some(result) = maybe_result {
-                                    if result.verbose {
+                                if let Some(result) = maybe_result
+                                    && result.verbose {
                                         ui::output::format_date_verbose(
                                             *off,
                                             &date_str,
@@ -502,7 +503,6 @@ fn main() {
                                         );
                                         ui::spacing(ui::SPACING_SECTION);
                                     }
-                                }
                             }
                         }
                     }
@@ -512,16 +512,14 @@ fn main() {
                         let date_str = display_date.format("%d.%m.%Y").to_string();
 
                         if let Some(row_results) = results_matrix.get(row_index) {
-                            for maybe_result in row_results {
-                                if let Some(result) = maybe_result {
-                                    ui::output::format_date_simple(
-                                        *off,
-                                        &date_str,
-                                        result.value(),
-                                        &result.cipher,
-                                    );
-                                    println!();
-                                }
+                            for result in row_results.iter().flatten() {
+                                ui::output::format_date_simple(
+                                    *off,
+                                    &date_str,
+                                    result.value(),
+                                    &result.cipher,
+                                );
+                                println!();
                             }
                         }
                     }
@@ -536,34 +534,31 @@ fn main() {
 
                     let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
 
-                    match payload {
-                        Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
-                            Ok(entries) if !entries.is_empty() => {
-                                let bedeutungen = load_bedeutungen_lang(lang);
+                    if let Some(data) = payload { match serde_json::from_str::<Vec<LookupEntry>>(data) {
+                        Ok(entries) if !entries.is_empty() => {
+                            let bedeutungen = load_bedeutungen_lang(lang);
 
-                                ui::spacing(ui::SPACING_MODE);
+                            ui::spacing(ui::SPACING_MODE);
 
-                                for entry in entries {
-                                    let bedeutung = bedeutungen.get(&entry.value);
-                                    let bedeutung_text = bedeutung
-                                        .and_then(|b| b.text.as_deref())
-                                        .unwrap_or("-");
+                            for entry in entries {
+                                let bedeutung = bedeutungen.get(&entry.value);
+                                let bedeutung_text = bedeutung
+                                    .and_then(|b| b.text.as_deref())
+                                    .unwrap_or("-");
 
-                                    ui::output::format_lookup_entry(
-                                        entry.value,
-                                        bedeutung_text,
-                                        &entry.sources,
-                                        bedeutung,
-                                        show_pos,
-                                        show_neg,
-                                        show_full,
-                                    );
-                                }
+                                ui::output::format_lookup_entry(
+                                    entry.value,
+                                    bedeutung_text,
+                                    &entry.sources,
+                                    bedeutung,
+                                    show_pos,
+                                    show_neg,
+                                    show_full,
+                                );
                             }
-                            _ => {}
-                        },
-                        None => {}
-                    }
+                        }
+                        _ => {}
+                    } }
                 }
             }
             Err(e) => output_error(ErrorCode::InvalidRange, &e, is_tty),
@@ -610,7 +605,7 @@ fn main() {
                 total: false,
             });
 
-            let _result_set = pipeline.run(&mut ctx, &[word.clone()], &spektra_ciphers);
+            let _result_set = pipeline.run(&mut ctx, std::slice::from_ref(word), &spektra_ciphers);
 
             // Collect results from memory (all reduce operations)
             let reduce_results: Vec<KernResult> = ctx
@@ -764,11 +759,10 @@ fn main() {
                 output_phase_json(&ctx.phase_results);
             }
 
-            if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
-                if let Ok(debug_json) = serde_json::to_string_pretty(&ctx.phase_results) {
+            if std::env::var("KERN_DUMP_RESULTSET").is_ok()
+                && let Ok(debug_json) = serde_json::to_string_pretty(&ctx.phase_results) {
                     eprintln!("[KERN DEBUG] PhaseResults = {debug_json}");
                 }
-            }
             return;
         }
 
@@ -795,9 +789,9 @@ fn main() {
             if show_lookup {
                 // Lookup mode: only output lookup results
                 let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
-                if let Some(data) = payload {
-                    if let Ok(entries) = serde_json::from_str::<Vec<LookupEntry>>(data) {
-                        if !entries.is_empty() {
+                if let Some(data) = payload
+                    && let Ok(entries) = serde_json::from_str::<Vec<LookupEntry>>(data)
+                        && !entries.is_empty() {
                             let bedeutungen = load_bedeutungen_lang(lang);
                             output_lookup_json(
                                 &entries,
@@ -808,8 +802,6 @@ fn main() {
                                 show_full,
                             );
                         }
-                    }
-                }
             } else {
                 // Reduce mode: output reduce results
                 output_reduce_json(&args, &result_set, &selected_ciphers, debug, show_length);
@@ -820,14 +812,14 @@ fn main() {
         // TTY output mode
         if cipher_count > 0 {
             // Group results by input
-            let mut grouped_by_input: HashMap<&str, Vec<(&str, u32, bool, &[String])>> = HashMap::new();
+            let mut grouped_by_input: HashMap<&str, Vec<CipherRow<'_>>> = HashMap::new();
 
             for (pipe_index, arg) in args.iter().enumerate() {
                 for cipher_index in 0..cipher_count {
                     if let Some(result) = base_results.get(&(pipe_index, cipher_index)) {
                         grouped_by_input
                             .entry(arg.as_str())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push((
                                 result.cipher.as_str(),
                                 result.value(),
@@ -907,40 +899,36 @@ fn main() {
         if show_lookup {
             let payload = lookup_results.last().and_then(|res| res.payload.as_deref());
 
-            match payload {
-                Some(data) => match serde_json::from_str::<Vec<LookupEntry>>(data) {
-                    Ok(entries) if !entries.is_empty() => {
-                        let bedeutungen = load_bedeutungen_lang(lang);
+            if let Some(data) = payload { match serde_json::from_str::<Vec<LookupEntry>>(data) {
+                Ok(entries) if !entries.is_empty() => {
+                    let bedeutungen = load_bedeutungen_lang(lang);
 
-                        ui::spacing(ui::SPACING_MODE);
+                    ui::spacing(ui::SPACING_MODE);
 
-                        for entry in entries {
-                            let bedeutung = bedeutungen.get(&entry.value);
-                            let bedeutung_text = bedeutung
-                                .and_then(|b| b.text.as_deref())
-                                .unwrap_or("-");
+                    for entry in entries {
+                        let bedeutung = bedeutungen.get(&entry.value);
+                        let bedeutung_text = bedeutung
+                            .and_then(|b| b.text.as_deref())
+                            .unwrap_or("-");
 
-                            ui::output::format_lookup_entry(
-                                entry.value,
-                                bedeutung_text,
-                                &entry.sources,
-                                bedeutung,
-                                show_pos,
-                                show_neg,
-                                show_full,
-                            );
-                        }
+                        ui::output::format_lookup_entry(
+                            entry.value,
+                            bedeutung_text,
+                            &entry.sources,
+                            bedeutung,
+                            show_pos,
+                            show_neg,
+                            show_full,
+                        );
                     }
-                    _ => {}
-                },
-                None => {}
-            }
+                }
+                _ => {}
+            } }
         }
-        if std::env::var("KERN_DUMP_RESULTSET").is_ok() {
-            if let Ok(debug_json) = serde_json::to_string_pretty(&result_set) {
+        if std::env::var("KERN_DUMP_RESULTSET").is_ok()
+            && let Ok(debug_json) = serde_json::to_string_pretty(&result_set) {
                 eprintln!("[KERN DEBUG] ResultSet = {debug_json}");
             }
-        }
     }
     // Note: If no ARGS provided, quietly exit (no error message needed)
 }
@@ -1143,7 +1131,7 @@ fn output_reduce_json(
                     .iter()
                     .map(|r| {
                         let descriptor = descriptors()
-                            .into_iter()
+                            .iter()
                             .find(|d| d.name == r.cipher)
                             .unwrap();
 

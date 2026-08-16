@@ -25,7 +25,7 @@ impl Cipher for FibonacciCipher {
             return ch.to_digit(10).unwrap_or(0);
         }
         let c = ch.to_ascii_uppercase();
-        if ('A'..='Z').contains(&c) {
+        if c.is_ascii_uppercase() {
             let idx = (c as u8 - b'A') as usize; // 0-based
             let fib = first_n_fib(26);
             fib[idx]

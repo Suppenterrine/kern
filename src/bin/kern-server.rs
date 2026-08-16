@@ -580,8 +580,15 @@ async fn lookup_multi_handler(
     let want_positive = matches!(sel, Some("pos") | Some("light") | Some("both") | Some("full"));
     let want_negative = matches!(sel, Some("neg") | Some("shadow") | Some("both") | Some("full"));
 
-    // If no numbers parameter provided, return all meanings (base description only)
-    if params.numbers.is_none() || params.numbers.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+    // A `numbers` parameter that is absent, empty or blank means "all meanings".
+    // Matching on it directly avoids re-checking and then unwrapping.
+    let requested = params
+        .numbers
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let Some(numbers) = requested else {
         let mut all_numbers: Vec<u32> = map.keys().copied().collect();
         all_numbers.sort();
 
@@ -594,9 +601,16 @@ async fn lookup_multi_handler(
                 negative: None,
             });
         }
-    } else {
+
+        return Ok(Json(LookupListResponse {
+            lang: lang.code(),
+            items,
+        }));
+    };
+
+    {
         // Parse specific numbers from parameter
-        for part in params.numbers.as_ref().unwrap().split(',') {
+        for part in numbers.split(',') {
             let s = part.trim();
             if s.is_empty() {
                 continue;
@@ -796,7 +810,7 @@ async fn spektra_handler(
         total: false,
     });
 
-    let _result_set = pipeline.run(&mut ctx, &[word.clone()], &spektra_ciphers);
+    let _result_set = pipeline.run(&mut ctx, std::slice::from_ref(word), &spektra_ciphers);
 
     // Collect results from memory (all reduce operations)
     let reduce_results: Vec<KernResult> = ctx

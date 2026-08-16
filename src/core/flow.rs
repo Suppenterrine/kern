@@ -74,7 +74,7 @@ impl Pipeline {
                             let result = KernResult::from_input(
                                 input,
                                 effective_verbose,
-                                cipher.as_ref(),
+                                cipher,
                                 ctx_step,
                             );
                             ctx.record(result.clone());
@@ -185,13 +185,13 @@ impl Pipeline {
                                 let left_result = KernResult::from_input(
                                     left_input,
                                     effective_verbose,
-                                    cipher.as_ref(),
+                                    cipher,
                                     ctx_step.clone(),
                                 );
                                 let right_result = KernResult::from_input(
                                     right_input,
                                     effective_verbose,
-                                    cipher.as_ref(),
+                                    cipher,
                                     ctx_step.clone(),
                                 );
 
@@ -219,12 +219,14 @@ impl Pipeline {
         result_set
     }
 
+    /// Hands back `&dyn Cipher` rather than `&Box<dyn Cipher>`: the caller only
+    /// ever calls trait methods, so the extra indirection tells it nothing.
     fn select_ciphers<'a>(
         &self,
         _step: &Step,
         ciphers: &'a [Box<dyn Cipher>],
         global_cipher_names: &[String],
-    ) -> Vec<(usize, &'a Box<dyn Cipher>)> {
+    ) -> Vec<(usize, &'a dyn Cipher)> {
         use std::collections::HashSet;
 
         // Build the set of cipher names from global flags only (no local flags)
@@ -233,30 +235,30 @@ impl Pipeline {
             .map(|s| s.to_lowercase())
             .collect();
 
+        let all = || -> Vec<(usize, &'a dyn Cipher)> {
+            ciphers
+                .iter()
+                .map(|c| c.as_ref())
+                .enumerate()
+                .collect()
+        };
+
         // If no global ciphers specified, return all ciphers
         if target_names.is_empty() {
-            return ciphers
-                .iter()
-                .enumerate()
-                .map(|(idx, cipher)| (idx, cipher))
-                .collect();
+            return all();
         }
 
         // Filter ciphers to match the target names
         let mut selected = Vec::new();
         for (idx, cipher) in ciphers.iter().enumerate() {
             if target_names.contains(&cipher.name().to_lowercase()) {
-                selected.push((idx, cipher));
+                selected.push((idx, cipher.as_ref()));
             }
         }
 
         // Fallback: if no matches found, return all ciphers
         if selected.is_empty() {
-            ciphers
-                .iter()
-                .enumerate()
-                .map(|(idx, cipher)| (idx, cipher))
-                .collect()
+            all()
         } else {
             selected
         }
