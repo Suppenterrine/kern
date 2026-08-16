@@ -73,6 +73,19 @@ Docker-Push ein unvollständiges Release unter deinem Namen hinterließ.
 Release hängen und nicht leer sind. Ein Job kann Erfolg melden, ohne dass sein
 Upload angekommen ist.
 
+### Ein Release geht sofort live
+
+Auf dem Host läuft **Watchtower** und zieht `:latest` automatisch. Ein
+veröffentlichtes Release ist damit binnen Minuten auf `kern.lukasbaumert.de`.
+Es gibt keinen manuellen Deploy-Schritt und keine Gelegenheit, dazwischen noch
+etwas zu prüfen.
+
+Das ist gewollt: Wer den Workflow startet, hat die Entscheidung zum
+Veröffentlichen bereits getroffen. Es heißt aber, dass **die
+Release-Entscheidung zugleich die Deploy-Entscheidung ist** — brechende
+Änderungen sind ab diesem Moment für alle Consumer wirksam. Deshalb liegt das
+Gate vor dem Draft und nicht danach.
+
 ---
 
 ## In der CI

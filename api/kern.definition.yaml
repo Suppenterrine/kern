@@ -3,7 +3,7 @@ openapi: 3.0.0
 info:
   title: KERN API
   # NOTE: bump via `cargo set-version`, never by hand.
-  version: 2.1.0
+  version: 3.0.0
   description: |
     The KERN API provides numerology analysis and helper endpoints
     for working with text, numbers, dates, and symbolic structures.
@@ -24,6 +24,11 @@ info:
     Errors are always English — `lang` selects the language of the content, not
     of the protocol. Every error carries a stable `code`; branch on that rather
     than on the human-readable `error` text.
+
+    Breaking changes in 3.0.0:
+      - `/reduce` no longer returns `total` unless `total=true` is passed, and
+        the `onlyTotal` parameter is gone — `items` are always returned
+      - `/date` no longer returns `meaning` unless `lookup=true` is passed
 
     Breaking changes in 2.0.0:
       - the default language changed from German to English; pass `lang=de` for
@@ -97,13 +102,22 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: total
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: |
+            Adds the aggregate total to the response. Absent by default —
+            a total that was never requested cannot be told apart from a
+            computed one.
       responses:
         '200':
           description: Reduction result
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ResultsResponse'
+                $ref: '#/components/schemas/ReduceResponse'
 
   /lookup:
     get:
@@ -179,6 +193,14 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: lookup
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: |
+            Adds the meaning to each date. Meanings are lookup information and
+            are absent by default, matching the CLI's `--lookup`.
         - $ref: '#/components/parameters/Lang'
       responses:
         '200':
@@ -309,13 +331,22 @@ components:
 
   schemas:
 
-    ResultsResponse:
+    ReduceResponse:
       type: object
+      required: [items]
       properties:
-        results:
+        items:
           type: array
           items:
             type: object
+        total:
+          type: integer
+          description: Present only when `total=true` was requested.
+        total_chain:
+          type: array
+          description: Present only with `total=true` and `debug=true`.
+          items:
+            type: string
 
     ServiceInfo:
       type: object

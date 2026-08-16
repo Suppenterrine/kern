@@ -4,7 +4,6 @@
 //! Design principles: Fast, Direct, Concrete, Weighty, Precise
 
 pub mod output;
-pub mod theme;
 
 // ============================================================================
 // SPACING CONSTANTS

@@ -113,7 +113,11 @@ struct DateItem {
     offset: i32,
     date: String,
     value: u32,
-    meaning: String,
+    /// Only present with `--lookup`. Meanings are lookup information; the TTY
+    /// date table never showed them, so emitting them unconditionally when
+    /// piped made the two modes disagree (issue #23).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meaning: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     chain: Option<Vec<String>>,
 }
@@ -480,6 +484,7 @@ fn main() {
                         &bedeutungen,
                         lang,
                         debug,
+                        show_lookup,
                     );
                     return;
                 }
@@ -1023,23 +1028,25 @@ fn output_date_json(
     bedeutungen: &HashMap<u32, kern::core::Bedeutung>,
     lang: Lang,
     debug: bool,
+    show_lookup: bool,
 ) {
     let mut dates = Vec::new();
 
     for (i, off) in offsets.iter().enumerate() {
         if let Some(result) = results.get(i).and_then(|r| *r) {
             let date = formatted_dates.get(i).map(|d| d.format("%d.%m.%Y").to_string()).unwrap_or_default();
-            let meaning = bedeutungen
-                .get(&result.value)
-                .and_then(|b| b.text.as_deref())
-                .unwrap_or_else(|| lang.missing_meaning())
-                .to_string();
 
             dates.push(DateItem {
                 offset: *off,
                 date,
                 value: result.value,
-                meaning,
+                meaning: show_lookup.then(|| {
+                    bedeutungen
+                        .get(&result.value)
+                        .and_then(|b| b.text.as_deref())
+                        .unwrap_or_else(|| lang.missing_meaning())
+                        .to_string()
+                }),
                 chain: if debug { Some(result.trace.clone()) } else { None },
             });
         }

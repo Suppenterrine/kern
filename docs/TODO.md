@@ -6,47 +6,6 @@ Offene Punkte für KERN. Erledigtes wird entfernt, nicht abgehakt.
 
 ## Offen
 
-### v2.0.0 auf den Live-Host ziehen
-
-Release v2.0.0 ist veröffentlicht, das Image liegt auf GHCR
-(`ghcr.io/suppenterrine/kern-server:v2.0.0` und `:latest`, Digest
-`sha256:5dffa5a6…`). **`kern.lukasbaumert.de` läuft aber noch v1.2.0** — der
-Release-Workflow pusht das Image, deployt es aber nicht.
-
-Auf dem Host:
-
-```bash
-docker pull ghcr.io/suppenterrine/kern-server:v2.0.0
-docker stop kern-server && docker rm kern-server
-docker run -d -p 3000:3000 --name kern-server ghcr.io/suppenterrine/kern-server:v2.0.0
-```
-
-Danach verifizieren:
-
-```bash
-curl https://kern.lukasbaumert.de/            # muss version 2.0.0 melden
-curl https://kern.lukasbaumert.de/lookup/7    # muss englisch antworten
-```
-
-**Consumer vorwarnen:** die Umstellung ist brechend. Aufrufe ohne `lang`
-bekommen ab dem Deploy englische statt deutscher Inhalte, und `/` liefert nicht
-mehr die Endpunkt-Übersicht (die liegt jetzt auf `/help`).
-
-### Der neue Release-Workflow ist ungetestet
-
-`release.yml` wurde auf `workflow_dispatch` mit Draft-First umgebaut, aber seit
-dem Umbau noch nicht ausgeführt — v2.0.0 lief über den alten Weg. Beim nächsten
-Release genau hinschauen, besonders auf die Asset-Uploads über die Release-ID.
-
-### Deployment automatisieren
-
-Der letzte Schritt ist Handarbeit auf dem Host — genau die Stelle, an der laut
-[PRINCIPLES §4](PRINCIPLES.md) ein Werkzeug stehen sollte. Solange das so ist,
-kann Live und Release auseinanderlaufen, ohne dass es jemand merkt.
-
-Mindestens: ein Health-Check, der die live gemeldete Version gegen den neuesten
-Release-Tag prüft.
-
 ### Flow-Engine entrümpeln
 
 Die Engine verspricht mehr, als sie tut — Details in
@@ -82,7 +41,11 @@ Nebenwirkung bis dahin: `./target/` enthält veraltete Binaries vom 19. Juli,
 während echte Builds nach `D:\rust-target\` gehen. Beim Testen von Binaries auf
 den Pfad achten.
 
-### Stale-Artefakte in `./target/` aufräumen
+### Stale-Artefakte in `./target/` aufräumen (erledigt, Notiz)
+
+Bereits aufgeräumt: `./target/` enthält nur noch die beiden Release-Binaries.
+Sobald `CARGO_TARGET_DIR` verschwindet, füllt sich das Verzeichnis wieder
+normal.
 
 Sobald der Target-Pfad zurückgestellt ist, sollten die alten Artefakte weg,
 sonst liegen dort weiterhin irreführende Binaries.

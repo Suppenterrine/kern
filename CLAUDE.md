@@ -144,6 +144,25 @@ published.
 
 Full detail: `docs/reference/tooling.md`.
 
+### Where tests live
+
+Split by what they reach, not by directory preference:
+
+- **`src/…` (unit tests)** — anything touching private items. `prompt_assets`,
+  `format_compartment_viz`, `rtap_source` and friends are private on purpose;
+  moving their tests to `tests/` would mean making them `pub` to satisfy a
+  layout rule, which trades design for tidiness.
+- **`tests/` (integration tests)** — the public API and the binaries.
+  `tests/cli_arguments.rs` drives the real `kern` executable.
+
+This is the Rust convention and was confirmed as the intended state (issue #24).
+
+### Releases go live immediately
+
+Watchtower on the host pulls `:latest` automatically, so publishing a release
+deploys it. There is no separate deploy step and no window to inspect in
+between — the release decision *is* the deploy decision.
+
 ### Documentation layout
 
 | Where | What |

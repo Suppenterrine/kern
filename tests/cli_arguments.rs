@@ -104,6 +104,22 @@ fn total_does_not_hide_the_items() {
     assert!(out.contains("\"input\":\"world\""), "items hidden: {out}");
 }
 
+/// Issue #23: the date table never showed meanings in the TTY, but the piped
+/// output carried them unconditionally. Meanings are lookup information and now
+/// require asking for a lookup — in both modes and in the API.
+#[test]
+fn date_meanings_require_lookup() {
+    let without = kern(&["-d", "0..1"]);
+    assert!(
+        !without.contains("\"meaning\""),
+        "meaning present without --lookup: {without}"
+    );
+    assert!(without.contains("\"value\""), "values missing: {without}");
+
+    let with = kern(&["-d", "0..1", "--lookup"]);
+    assert!(with.contains("\"meaning\""), "meaning missing: {with}");
+}
+
 #[test]
 fn unsupported_flag_combination_is_rejected_wherever_it_is_typed() {
     for args in [

@@ -241,7 +241,7 @@ Reduziert ein oder mehrere Inputs mit einem oder mehreren Chiffren.
 - `cipher` (optional): Kommagetrennte Cipher-Codes oder `all`
 - `debug` (optional): `true` für Berechnungsschritte (chains)
 - `length` (optional): `true` für Wort-Längen
-- `onlyTotal` (optional): `true` für nur die Gesamtsumme
+- `total` (optional): `true` ergänzt die Gesamtsumme (standardmäßig **nicht** enthalten)
 
 **Beispiele:**
 
@@ -255,8 +255,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Wickfeld"
       "input": "Wickfeld",
       "value": 1
     }
-  ],
-  "total": 1
+  ]
 }
 ```
 
@@ -269,8 +268,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Test,Love,Life"
     {"input": "Test", "value": 1},
     {"input": "Love", "value": 9},
     {"input": "Life", "value": 3}
-  ],
-  "total": 4
+  ]
 }
 ```
 
@@ -288,8 +286,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=or,py,ch"
         {"name": "chaldean", "code": "ch", "value": 4}
       ]
     }
-  ],
-  "total": 1
+  ]
 }
 ```
 
@@ -308,8 +305,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=all"
         ... (alle 11 Ciphers)
       ]
     }
-  ],
-  "total": 1
+  ]
 }
 ```
 
@@ -331,8 +327,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=all&debug=true"
         ...
       ]
     }
-  ],
-  "total": 1
+  ]
 }
 ```
 
@@ -404,6 +399,7 @@ Reduziert einen Datums-Bereich.
 **Parameter:**
 - `range` (erforderlich): Offset-Range (z.B. `-3..7`) oder Datums-Range (z.B. `25.12.2025..02.01.2026`)
 - `debug` (optional): `true` für Berechnungsschritte
+- `lookup` (optional): `true` ergänzt die Bedeutung je Datum (standardmäßig **nicht** enthalten)
 - `lang` (optional): `en` (Standard), `de`, `fr`
 
 **Beispiel:**
@@ -569,5 +565,5 @@ Exit-Code 1. Vollständige Referenz: [docs/reference/error-codes.md](docs/refere
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 2.1.0
+**STATUS:** Stabil | **VERSION:** 3.0.0
 
