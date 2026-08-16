@@ -322,7 +322,7 @@ $ curl "https://kern.lukasbaumert.de/reduce?input=Test&cipher=all&debug=true"
           "name": "ordinal",
           "code": "or",
           "value": 1,
-          "chain": ["Test", "64", "10", "1"]
+          "chain": ["20+5+19+20 = 64", "6+4 = 10", "1+0 = 1", "→ 1"]
         },
         ...
       ]
@@ -565,5 +565,5 @@ Exit-Code 1. Vollständige Referenz: [docs/reference/error-codes.md](docs/refere
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 3.0.0
+**STATUS:** Stabil | **VERSION:** 4.0.0
 

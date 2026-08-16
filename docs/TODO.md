@@ -6,21 +6,6 @@ Offene Punkte für KERN. Erledigtes wird entfernt, nicht abgehakt.
 
 ## Offen
 
-### Flow-Engine entrümpeln
-
-Die Engine verspricht mehr, als sie tut — Details in
-[reference/flow-engine.md](reference/flow-engine.md). Konkret:
-
-- `Operation::Custom` wird nirgends erzeugt und tut nichts
-- `select_ciphers` ignoriert seinen `_step`-Parameter (Auswahl pro Schritt war
-  gedacht, kam nie)
-- `Step::cipher_index` wird beim Anlegen übergeben, aber von `run()`
-  überschrieben, bevor er gelesen wird
-- Der Reihenfolge-Vertrag (Nachbearbeitung muss nach den Reduce-Schritten
-  eingefügt werden) ist ungeschrieben und ungeprüft
-
-Kein Umbau, sondern Wegnehmen. Teil von Issue #23.
-
 ### Referenz-Dokumentation vervollständigen
 
 `docs/reference/` deckt bisher Tooling, Lokalisierung und Fehlercodes ab. Offen

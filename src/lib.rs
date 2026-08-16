@@ -256,7 +256,6 @@ pub mod core {
         DateReduce,
         Lookup,
         PhaseRelation,
-        Custom(String),
     }
 
     impl fmt::Display for Operation {
@@ -267,7 +266,6 @@ pub mod core {
                 Operation::DateReduce => write!(f, "date::reduce"),
                 Operation::Lookup => write!(f, "lookup"),
                 Operation::PhaseRelation => write!(f, "phase::relation"),
-                Operation::Custom(name) => write!(f, "{name}"),
             }
         }
     }
@@ -290,10 +288,13 @@ pub mod core {
     }
 
     impl Step {
-        pub fn new(pipe_index: usize, cipher_index: usize, operation: Operation) -> Self {
+        /// `cipher_index` is deliberately not a parameter: `Pipeline::run` sets
+        /// it per cipher while executing, so any value passed in here would be
+        /// overwritten before anything read it.
+        pub fn new(pipe_index: usize, operation: Operation) -> Self {
             Self {
                 pipe_index,
-                cipher_index,
+                cipher_index: 0,
                 operation,
                 metadata: None,
             }
@@ -600,7 +601,7 @@ pub mod core {
     }
 
     pub fn reduce_number_verbose(input: &str, debug: bool) -> u32 {
-        let step = Step::new(0, 0, Operation::Reduce);
+        let step = Step::new(0, Operation::Reduce);
         let result = KernResult::from_input_default(input, debug, step);
         if debug {
             for line in &result.trace {
