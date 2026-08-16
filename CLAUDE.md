@@ -89,9 +89,19 @@ Available ciphers include: Ordinal, Reverse Ordinal, Pythagorean, Reverse Pythag
 - `Lookup`: Collect all values and their sources for bedeutungen.yaml lookup
 - `Custom(String)`: Placeholder for extensions
 
-**Flags System**: There are two levels of flags:
-- **Global flags**: Apply to entire execution (e.g., `--verbose`, `--cipher`)
-- **Local flags**: Apply to specific pipeline positions (e.g., `word1 -v word2 -c py,ch`)
+**Flags**: All flags are global — they apply to the entire execution.
+
+Position matters, inconsistently: flags are only recognised **before** the
+first input. After it they are silently reduced as if they were words
+(`kern hello --verbose` reduces the string "--verbose"). The sole exceptions
+are `-t/--total` and `-l/--lookup`, which `parse_pipeline_tokens` picks out by
+hand and which therefore work anywhere.
+
+Earlier versions of this file described "local flags" bound to pipeline
+positions (`word1 -v word2 -c py,ch`). **That does not exist** — `-v` is
+reduced as a word, and `-c` is not defined as a short form at all. Measured
+behaviour and a one-line fix are written up in
+`docs/proposals/cli-argument-order.md`.
 
 ### Key Files
 

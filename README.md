@@ -146,11 +146,16 @@ $ kern --spektra test
 
 *Hinweis: Bei Builds ohne Clipboard-Feature (`--no-default-features`) wird der Prompt direkt als Text ausgegeben.*
 
-**Lokale Cipher pro Input:**
+**Position der Flags:** Flags müssen **vor** dem ersten Input stehen.
+
 ```bash
-$ kern input1 input2 -c chaldean input3
+$ kern --cipher chaldean hello    # ✅
+$ kern hello --cipher chaldean    # ❌ "--cipher" wird als Wort reduziert
 ```
-(input1 und input2 nutzen Standard-Cipher, input3 ergänzt lokal Chaldean)
+
+Ausnahme sind `-t/--total` und `-l/--lookup`, die auch hinten funktionieren.
+Diese Inkonsistenz ist bekannt; Analyse und Lösungsvorschlag stehen in
+[docs/proposals/cli-argument-order.md](docs/proposals/cli-argument-order.md).
 
 ---
 
