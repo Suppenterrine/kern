@@ -47,18 +47,6 @@ kann Live und Release auseinanderlaufen, ohne dass es jemand merkt.
 Mindestens: ein Health-Check, der die live gemeldete Version gegen den neuesten
 Release-Tag prüft.
 
-### CLI: Flags an jeder Position erlauben
-
-Heute werden Flags **nach** dem ersten Input stillschweigend als Wörter
-reduziert — `kern hello --cipher chaldean` berechnet die Quersumme von
-„--cipher". Kein Fehler, nur ein falsches Ergebnis. Ausnahme sind `-t` und
-`-l`, was die Sache inkonsistent statt bloß streng macht.
-
-Analyse, Messwerte und der Ein-Zeilen-Fix stehen in
-[proposals/cli-argument-order.md](proposals/cli-argument-order.md). Vorher zu
-entscheiden: ob „lokale Flags pro Pipeline-Position" aufgegeben werden (dort
-Variante A, empfohlen) oder tatsächlich gebaut werden sollen.
-
 ### Referenz-Dokumentation vervollständigen
 
 `docs/reference/` deckt bisher Tooling, Lokalisierung und Fehlercodes ab. Offen

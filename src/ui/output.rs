@@ -298,8 +298,17 @@ fn format_phase(phase: i32) -> String {
     }
 }
 
-/// Format compartment visualization with underline
-/// Only shows single-digit values (1-9) in compartments, not master numbers
+/// The three compartments, each holding the digits that reduce into it.
+const COMPARTMENTS: [[u32; 3]; 3] = [[1, 4, 7], [2, 5, 8], [3, 6, 9]];
+
+/// Format compartment visualization, underlining the value at its real position.
+///
+/// The digits are always printed in full; only the matching one is underlined.
+/// An earlier version built each compartment as a template with the value
+/// spliced into a fixed slot — `format!("36{value}")` for compartment 3 — which
+/// was correct only when the value happened to sit in that slot. A value of 6
+/// rendered as `366` instead of `369`, so six of the nine possible values were
+/// displayed wrong (issue #21).
 fn format_compartment_viz(value: u32, compartment: u32) -> String {
     // For master numbers, map to their representative digit in the compartment
     let display_value = match value {
@@ -309,25 +318,78 @@ fn format_compartment_viz(value: u32, compartment: u32) -> String {
         _ => value,
     };
 
-    let comp1 = if compartment == 1 {
-        format!("\x1b[4m{}\x1b[0m47", display_value)  // Underline the value
-    } else {
-        "147".to_string()
-    };
+    let cells: Vec<String> = COMPARTMENTS
+        .iter()
+        .enumerate()
+        .map(|(idx, digits)| {
+            let is_active = compartment as usize == idx + 1;
+            digits
+                .iter()
+                .map(|digit| {
+                    if is_active && *digit == display_value {
+                        format!("\x1b[4m{digit}\x1b[0m")
+                    } else {
+                        digit.to_string()
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect();
 
-    let comp2 = if compartment == 2 {
-        format!("2\x1b[4m{}\x1b[0m8", display_value)  // Underline the value
-    } else {
-        "258".to_string()
-    };
+    format!("[{}] [{}] [{}]", cells[0], cells[1], cells[2])
+}
 
-    let comp3 = if compartment == 3 {
-        format!("36\x1b[4m{}\x1b[0m", display_value)  // Underline the value
-    } else {
-        "369".to_string()
-    };
+#[cfg(test)]
+mod compartment_tests {
+    use super::*;
 
-    format!("[{}] [{}] [{}]", comp1, comp2, comp3)
+    /// Strips the underline escape codes so the digits can be compared.
+    fn digits_only(s: &str) -> String {
+        s.replace("\x1b[4m", "").replace("\x1b[0m", "")
+    }
+
+    #[test]
+    fn every_value_keeps_all_nine_digits() {
+        for (idx, digits) in COMPARTMENTS.iter().enumerate() {
+            let compartment = idx as u32 + 1;
+            for &value in digits {
+                let out = digits_only(&format_compartment_viz(value, compartment));
+                assert_eq!(
+                    out, "[147] [258] [369]",
+                    "value {value} in compartment {compartment} rendered as {out}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_value_is_underlined_at_its_own_position() {
+        // Regression for issue #21: 6 sits in compartment 3 and must render
+        // 369 with the 6 marked, not 366.
+        let out = format_compartment_viz(6, 3);
+        assert!(out.contains("3\x1b[4m6\x1b[0m9"), "got {out:?}");
+
+        // The previously correct-by-accident cases must stay correct.
+        assert!(format_compartment_viz(1, 1).contains("\x1b[4m1\x1b[0m47"));
+        assert!(format_compartment_viz(5, 2).contains("2\x1b[4m5\x1b[0m8"));
+        assert!(format_compartment_viz(9, 3).contains("36\x1b[4m9\x1b[0m"));
+    }
+
+    #[test]
+    fn master_numbers_map_to_their_representative_digit() {
+        assert!(format_compartment_viz(11, 1).contains("\x1b[4m1\x1b[0m47"));
+        assert!(format_compartment_viz(22, 2).contains("\x1b[4m2\x1b[0m58"));
+        assert!(format_compartment_viz(33, 3).contains("\x1b[4m3\x1b[0m69"));
+    }
+
+    #[test]
+    fn inactive_compartments_are_never_marked() {
+        let out = format_compartment_viz(6, 3);
+        let inactive: Vec<&str> = out.split(' ').take(2).collect();
+        for cell in inactive {
+            assert!(!cell.contains('\x1b'), "inactive cell {cell:?} was marked");
+        }
+    }
 }
 
 /// Format a single phase relation result

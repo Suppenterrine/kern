@@ -16,6 +16,7 @@ selben Zug seine Referenz. Siehe [PRINCIPLES §7](../PRINCIPLES.md).
 | [tooling.md](tooling.md) | `cargo xtask`-Befehle, Versionsregel, Konsistenz-Checks |
 | [localization.md](localization.md) | Sprachsystem: `Lang`, Abdeckung pro Inhaltstyp, Ablehnungsregeln |
 | [error-codes.md](error-codes.md) | Fehlercodes, Vertrag mit Consumern, CLI/Server-Deckungsgleichheit |
+| [cli-arguments.md](cli-arguments.md) | Flag-Positionen, warum alle Flags global sind, `--`-Trenner |
 
 ## Noch offen
 
