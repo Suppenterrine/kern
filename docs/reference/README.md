@@ -17,6 +17,7 @@ selben Zug seine Referenz. Siehe [PRINCIPLES §7](../PRINCIPLES.md).
 | [localization.md](localization.md) | Sprachsystem: `Lang`, Abdeckung pro Inhaltstyp, Ablehnungsregeln |
 | [error-codes.md](error-codes.md) | Fehlercodes, Vertrag mit Consumern, CLI/Server-Deckungsgleichheit |
 | [cli-arguments.md](cli-arguments.md) | Flag-Positionen, warum alle Flags global sind, `--`-Trenner |
+| [phase.md](phase.md) | Fächer, Zyklus, warum die Argumentreihenfolge das Vorzeichen dreht |
 
 ## Noch offen
 
@@ -25,7 +26,6 @@ suggerieren, die Referenz sei vollständig:
 
 - `core/flow.rs` — Pipeline-Engine, `FlowContext`, `Step`/`Operation`
 - `core/ciphers/` — Cipher-Trait und die 11 Implementierungen
-- `core/phase.rs` — Compartments und Phasenrelationen
 - `core/spektra.rs` — Achsenberechnung (die Sprachseite steht in `localization.md`)
 - `ui/` — TTY-Ausgabe, Theming, `is_tty`-Umschaltung
 - Der Unterschied zwischen TTY- und Pipe-Modus im CLI
