@@ -64,19 +64,32 @@ fn check_release(root: &Path) -> Result<(), Box<dyn Error>> {
 
     println!("  version {version}");
 
-    let notes = root.join("docs/release-notes").join(format!("{version}.md"));
+    let rel_notes = format!("docs/release-notes/{version}.md");
+    let notes = root.join(&rel_notes);
     match fs::read_to_string(&notes) {
         Ok(text) if text.trim().is_empty() => problems.push(format!(
-            "docs/release-notes/{version}.md is empty — it becomes the release body"
+            "{rel_notes} is empty — it becomes the release body"
         )),
-        Ok(text) => println!(
-            "  ok      release note present ({} lines)",
-            text.lines().count()
-        ),
+        Ok(text) => {
+            // The file being on disk is not enough: the workflow reads it from
+            // a fresh checkout. A gitignored note passes every local check and
+            // then fails in CI, which is exactly how docs/release-notes/ went
+            // uncommitted once — `git add -A` skipped it in silence.
+            if is_git_ignored(root, &rel_notes) {
+                problems.push(format!(
+                    "{rel_notes} exists locally but is git-ignored, so the release \
+                     workflow will not see it. Check .gitignore"
+                ));
+            } else {
+                println!(
+                    "  ok      release note present ({} lines)",
+                    text.lines().count()
+                );
+            }
+        }
         Err(_) => problems.push(format!(
-            "docs/release-notes/{version}.md is missing. Write it before releasing — \
-             it becomes the release body and cannot be added later without editing \
-             a published release"
+            "{rel_notes} is missing. Write it before releasing — it becomes the \
+             release body and cannot be added later without editing a published release"
         )),
     }
 
@@ -322,6 +335,17 @@ fn bump(root: &Path, kind: &str) -> Result<(), Box<dyn Error>> {
     println!("version bumped ({kind}): {old} -> {new}");
 
     sync_version(root, false)
+}
+
+/// Whether git would ignore `rel_path`. A missing git returns false — the check
+/// is a safety net, not a reason to block a release on its own.
+fn is_git_ignored(root: &Path, rel_path: &str) -> bool {
+    std::process::Command::new("git")
+        .args(["check-ignore", "-q", rel_path])
+        .current_dir(root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn cargo_version(root: &Path) -> Result<String, Box<dyn Error>> {
