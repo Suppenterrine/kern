@@ -146,16 +146,16 @@ $ kern --spektra test
 
 *Hinweis: Bei Builds ohne Clipboard-Feature (`--no-default-features`) wird der Prompt direkt als Text ausgegeben.*
 
-**Position der Flags:** Flags müssen **vor** dem ersten Input stehen.
+**Position der Flags:** beliebig — vor dem Input, dahinter, dazwischen.
 
 ```bash
-$ kern --cipher chaldean hello    # ✅
-$ kern hello --cipher chaldean    # ❌ "--cipher" wird als Wort reduziert
+$ kern hello --cipher chaldean --lookup    # empfohlen
+$ kern --cipher chaldean hello             # gleichwertig
 ```
 
-Ausnahme sind `-t/--total` und `-l/--lookup`, die auch hinten funktionieren.
-Diese Inkonsistenz ist bekannt; Analyse und Lösungsvorschlag stehen in
-[docs/proposals/cli-argument-order.md](docs/proposals/cli-argument-order.md).
+Alle Flags gelten global für den ganzen Aufruf. Inputs mit führendem
+Bindestrich brauchen `--` als Trenner: `kern -- -abc`. Details:
+[docs/reference/cli-arguments.md](docs/reference/cli-arguments.md).
 
 ---
 
@@ -569,5 +569,5 @@ Exit-Code 1. Vollständige Referenz: [docs/reference/error-codes.md](docs/refere
 
 ---
 
-**STATUS:** Stabil | **VERSION:** 2.0.0
+**STATUS:** Stabil | **VERSION:** 2.1.0
 

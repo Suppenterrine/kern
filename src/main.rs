@@ -63,11 +63,15 @@ struct ReduceItem {
 }
 
 /// Reduce mode response
+///
+/// `total` is absent unless `--total` was given. It used to be a plain `u32`
+/// filled with `unwrap_or(0)`, so every call without `--total` reported
+/// `"total": 0` — a number that was never computed (issue #23).
 #[derive(Serialize)]
 struct ReduceResponse {
+    items: Vec<ReduceItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    items: Option<Vec<ReduceItem>>,
-    total: u32,
+    total: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     total_chain: Option<Vec<String>>,
 }
@@ -297,7 +301,6 @@ fn main() {
         .arg(
             Arg::new("ARGS")
                 .num_args(1..)
-                .allow_hyphen_values(true)
                 .help("Input strings to be reduced"),
         )
         .get_matches();
@@ -307,9 +310,9 @@ fn main() {
     let is_tty = matches!(output_mode, OutputMode::Tty);
 
     let debug = matches.get_flag("debug");
-    let mut show_total = matches.get_flag("total");
+    let show_total = matches.get_flag("total");
     let show_length = matches.get_flag("length");
-    let mut show_lookup = matches.get_flag("lookup");
+    let show_lookup = matches.get_flag("lookup");
     let show_pos = matches.get_flag("pos");
     let show_neg = matches.get_flag("neg");
     let show_full = matches.get_flag("full");
@@ -704,7 +707,13 @@ fn main() {
     if let Some(args_values) = matches.get_many::<String>("ARGS") {
         let raw_tokens: Vec<String> = args_values.map(|s| s.to_string()).collect();
 
-        let parsed = match parse_pipeline_tokens(&raw_tokens, &cipher_alias_map, show_pmr) {
+        let parsed = match parse_pipeline_tokens(
+            &raw_tokens,
+            &cipher_alias_map,
+            show_pmr,
+            show_total,
+            show_lookup,
+        ) {
             Ok(data) => data,
             Err((code, err)) => {
                 output_error(code, &err, is_tty);
@@ -714,9 +723,6 @@ fn main() {
         if parsed.inputs.is_empty() {
             return;
         }
-
-        show_total = show_total || parsed.saw_total;
-        show_lookup = show_lookup || parsed.saw_lookup;
 
         let args = parsed.inputs;
         let reduce_steps = parsed.steps;
@@ -748,7 +754,7 @@ fn main() {
         let result_set = pipeline.run(&mut ctx, &args, &selected_ciphers);
 
         // Check if we're in phase relation mode
-        let is_phase_mode = !parsed.phase_inputs.is_empty();
+        let is_phase_mode = parsed.is_phase_mode;
 
         if is_phase_mode {
             // Phase relation mode: output phase results
@@ -806,7 +812,7 @@ fn main() {
                 }
             } else {
                 // Reduce mode: output reduce results
-                output_reduce_json(&args, &result_set, &selected_ciphers, debug, show_length, show_total);
+                output_reduce_json(&args, &result_set, &selected_ciphers, debug, show_length);
             }
             return;
         }
@@ -1114,7 +1120,6 @@ fn output_reduce_json(
     selected_ciphers: &[Box<dyn Cipher>],
     debug: bool,
     show_length: bool,
-    show_total: bool,
 ) {
     let multi_cipher = selected_ciphers.len() > 1;
     let mut items = Vec::new();
@@ -1173,12 +1178,11 @@ fn output_reduce_json(
         }
     }
 
-    // Calculate total
+    // Only reported when it was actually computed — no invented zero.
     let total = result_set.results
         .iter()
         .find(|r| matches!(r.step.operation, Operation::AggregateTotal))
-        .map(|r| r.value)
-        .unwrap_or(0);
+        .map(|r| r.value);
 
     let total_chain = if debug {
         result_set.results
@@ -1189,8 +1193,11 @@ fn output_reduce_json(
         None
     };
 
+    // Items are always reported. Hiding them under --total made one flag do two
+    // things, and made the piped output disagree with the TTY output, which has
+    // always shown both (issue #23).
     let response = ReduceResponse {
-        items: if !show_total { Some(items) } else { None },
+        items,
         total,
         total_chain,
     };
@@ -1223,14 +1230,7 @@ fn build_cipher_alias_map(cipher_labels: &[String]) -> HashMap<String, String> {
 struct ParsedPipeline {
     inputs: Vec<String>,
     steps: Vec<Step>,
-    saw_total: bool,
-    saw_lookup: bool,
-    phase_inputs: Vec<PhaseInput>,
-}
-
-struct PhaseInput {
-    #[allow(dead_code)]
-    parts: Vec<String>,
+    is_phase_mode: bool,
 }
 
 /// Parse tokens into a list of input strings and steps.
@@ -1242,27 +1242,15 @@ fn parse_pipeline_tokens(
     tokens: &[String],
     _cipher_aliases: &HashMap<String, String>,
     phase_mode: bool,
+    show_total: bool,
+    show_lookup: bool,
 ) -> Result<ParsedPipeline, (ErrorCode, String)> {
-    let mut inputs = Vec::new();
+    // Every token is an input. Flags never reach here — clap parses them
+    // wherever they appear. This function used to fish `-t` and `-l` out of the
+    // token stream by hand, which is exactly why those two worked after the
+    // input while every other flag was silently reduced as a word.
+    let inputs: Vec<String> = tokens.to_vec();
     let mut steps = Vec::new();
-    let mut saw_total = false;
-    let mut saw_lookup = false;
-
-    // Parse tokens: separate flags and inputs
-    for token in tokens {
-        match token.as_str() {
-            "-t" | "--total" => {
-                saw_total = true;
-            }
-            "-l" | "--lookup" => {
-                saw_lookup = true;
-            }
-            _ => {
-                // All other tokens are inputs
-                inputs.push(token.clone());
-            }
-        }
-    }
 
     // If we're in phase relation mode
     if phase_mode {
@@ -1274,14 +1262,16 @@ fn parse_pipeline_tokens(
             ));
         }
 
-        // --total and --lookup are not supported with phase relations (for now)
-        if saw_total {
+        // --total and --lookup are not supported with phase relations (for now).
+        // Read from the parsed flags rather than from the token stream, so the
+        // rejection no longer depends on where the flag was typed.
+        if show_total {
             return Err((
                 ErrorCode::InvalidArguments,
                 "--total is not supported with phase relation mode".to_string(),
             ));
         }
-        if saw_lookup {
+        if show_lookup {
             return Err((
                 ErrorCode::InvalidArguments,
                 "--lookup is not supported with phase relation mode".to_string(),
@@ -1301,14 +1291,10 @@ fn parse_pipeline_tokens(
             steps.push(step);
         }
 
-        let phase_input = PhaseInput { parts: inputs.clone() };
-
         return Ok(ParsedPipeline {
             inputs,
             steps,
-            saw_total,
-            saw_lookup,
-            phase_inputs: vec![phase_input],
+            is_phase_mode: true,
         });
     }
 
@@ -1321,8 +1307,6 @@ fn parse_pipeline_tokens(
     Ok(ParsedPipeline {
         inputs,
         steps,
-        saw_total,
-        saw_lookup,
-        phase_inputs: vec![],
+        is_phase_mode: false,
     })
 }

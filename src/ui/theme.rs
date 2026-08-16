@@ -34,7 +34,6 @@ impl Theme {
     }
 
     /// Create default theme (for future activation)
-    #[allow(dead_code)]
     pub fn default_theme() -> Self {
         Self {
             enabled: true,
@@ -49,7 +48,6 @@ impl Theme {
     }
 
     /// Detect if colors should be enabled based on environment
-    #[allow(dead_code)]
     pub fn auto_detect() -> Self {
         // Check NO_COLOR environment variable
         if env::var("NO_COLOR").is_ok() {
